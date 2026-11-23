@@ -13,11 +13,19 @@ this project runs a model it does not own or include.
 | | |
 |---|---|
 | **model** | [`oruk/oruk-fourier-2b`](https://huggingface.co/oruk/oruk-fourier-2b) |
-| **creator** | oruk |
+| **creator** | [oruk](https://oruk.ai) |
 | **revision** | `8c2a8871f1304aa2f634da4fb95e24438c4945b9` |
 | **license** | [cc by-nc 4.0](https://creativecommons.org/licenses/by-nc/4.0/) |
-| **base models listed on its model card** | `Qwen/Qwen3-ASR-1.7B`, `Musci-research/Musci-ASR-qwen-1019-hf` |
 
+the model is a derivative of these apache-2.0 models, and their credit is kept here:
+
+| base model | creator | license |
+|---|---|---|
+| [`Qwen/Qwen3-ASR-1.7B`](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) | qwen | [apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| [`Musci-research/Musci-ASR-qwen-1019-hf`](https://huggingface.co/Musci-research/Musci-ASR-qwen-1019-hf), a fine-tune of qwen3-asr | musci-research | [apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+
+- **commercial use and hosting:** hosted or api serving, and other commercial use, need a separate commercial license from [oruk](https://oruk.ai). the license of this project does not grant that.
+- **app-specific permissions:** oruk's permissions for named apps on the model page do not extend to this project.
 - the weights are not in this repo. they are downloaded from the model's page.
 - **changes to the weights:** the kit converts them on your machine into formats for the cpu, gpu and neural engine. this can include converting bf16 values to 16-bit float. the converted files are adaptations of the model and stay under its license.
 - the model's creators do not endorse this project.
