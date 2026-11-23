@@ -25,7 +25,7 @@ it ships as a swift sdk and a swiftui mac app.
 - **nothing is set in stone.** no chip, engine or trick is chosen in advance. the numbers choose.
 - **use the npu as needed.** it is tried for every stage and used wherever it is fastest or ties. it is never forced in at the cost of speed or accuracy.
 - **measure, don't assume.** only a trace proves where something ran.
-- **license:** the weights are cc by-nc 4.0, so this is non-commercial.
+- **license:** the library and app code are mit. the weights keep their original cc by-nc 4.0 license, so anything using them is non-commercial.
 - **all lowercase.** every piece of text the app renders is lowercase, including labels, menus, errors and transcripts, and so is all markdown prose. code identifiers, paths, urls and license text keep their case.
 - **lowercase is display only.** the sdk returns the model's exact text, so the golden gates still compare true output. copy and export also keep the exact text.
 
@@ -127,7 +127,7 @@ every stage is built so it can run on more than one chip. the best mix is found 
 ```text
 FourierKit/
 ├── README.md                what it is, a quick start, results
-├── LICENSE                  the code license
+├── LICENSE                  mit, for the code
 ├── NOTICE.md                the model's license and credits
 ├── CONTRIBUTING.md          how to build, test and send changes
 ├── CHANGELOG.md             what changed in each version
@@ -156,7 +156,7 @@ FourierKit/
 
 **ready to go public later:**
 
-- **two licenses, kept apart.** the code gets its own license, chosen before release. the weights stay cc by-nc 4.0 and are never in the repo, and `NOTICE.md` says so clearly.
+- **two licenses, kept apart.** the code is mit. the weights stay cc by-nc 4.0 and are never in the repo. `NOTICE.md` carries their license and credit, and says clearly that mit does not cover them.
 - **golden clips must be shareable.** use public-domain or openly licensed audio, or your own recordings, so the golden set can be published.
 - **nothing private in the repo.** no local paths, no private repo names, no personal details. private working notes sit in an ignored folder.
 - **no copied code.** everything read as a reference is credited in `NOTICE.md` as inspiration only.
