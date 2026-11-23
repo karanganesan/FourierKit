@@ -31,6 +31,7 @@ it ships as a swift sdk and a swiftui mac app.
 - **python lives in one place:** a small harness that runs transformers to make the golden answers. it never ships.
 - **nothing is set in stone.** no chip, engine or trick is chosen in advance. the numbers choose.
 - **npu first.** anywhere the npu can run a stage, it gets built and tried there first. it stays wherever it passes the golden test and is fastest or ties. accuracy is never traded for it.
+- **the main thread is never touched.** all model, audio and file work runs in the background, so the ui never waits on it.
 - **measure, don't assume.** only a trace proves where something ran.
 - **license:** the engine, sdk and app are [cc by-nc 4.0](https://creativecommons.org/licenses/by-nc/4.0/), the same as the weights. all of it is non-commercial and requires attribution.
 - **all lowercase.** every piece of text the app renders is lowercase, including labels, menus, errors and transcripts, and so is all markdown prose. code identifiers, paths, urls and license text keep their case.
@@ -159,6 +160,25 @@ on the npu, the decoder can be cut into several sequential pieces to fit its siz
 - **precision is the main accuracy risk.** the fast paths compute in 16-bit, and the npu is 16-bit only. where that changes the output, that stage moves to a 32-bit path on the gpu or cpu.
 - **no weight compression at first.** the source checkpoint is never changed. a compressed copy is tried last, and kept only if it passes the golden test.
 
+## threads: the main thread stays free
+
+**the rule:** the main thread only draws the ui. no stage in this plan runs on it.
+
+| work | where it runs |
+|---|---|
+| **ui** | main thread, drawing only |
+| **microphone callback** | the realtime audio thread. it only copies samples into a lock-free ring buffer, with no locks, allocation or waiting |
+| **audio decode, resample, mel** | background pipeline |
+| **npu, gpu and cpu inference** | background pipeline, one owner per chip, waiting on chips without blocking a thread |
+| **beam search and text** | background pipeline |
+| **download, convert, load, warm-up** | low-priority background work, with progress |
+| **file reads, exports, measurement logs** | background |
+
+- **stages are connected by bounded queues.** a slow stage slows the stage before it and cannot pile up memory. the microphone buffer is sized so audio is not dropped.
+- **the ui gets at most one text update per frame.** the pipeline coalesces changes, and the main actor only applies the newest one.
+- **the sdk is safe to call from the main actor.** every heavy api is `async` and leaves the main actor at once. events are delivered off the main actor, and the app hops over only to draw.
+- **live work has top priority.** batch work yields to it, and cancel stops work at the next stage boundary.
+
 ## accuracy
 
 **the holy grail: one golden test, three audio clips, many dimensions.** there are no unit tests, no ci and no other test suites. if the golden test is right, the engine is right.
@@ -182,6 +202,7 @@ on the npu, the decoder can be cut into several sequential pieces to fit its siz
 | **every placement** | each chip mix that can ship passes on its own |
 | **every mode** | file and recorded input match the reference |
 | **live replay** | played in at real speed, settled text is never taken back and the final equals the file result |
+| **main thread** | no model work runs on it, and it never stalls for more than 8 ms during any run |
 
 **scored on all three clips.** these drive the hill-climb:
 
