@@ -1,6 +1,13 @@
 # fourier, native on apple silicon: plan
 
-**the goal: the best inference engine for `oruk/oruk-fourier-2b` on this mac (apple m4, 32 gb), meaning the fastest one that still gets the same answer as the original model.**
+**the goal: the best inference engine for `oruk/oruk-fourier-2b` on this mac (apple m4, 32 gb).**
+
+| target | what it means | how it is measured |
+|---|---|---|
+| **same accuracy** | the same answer as the reference. this is never traded away | identical token ids and text on the three golden clips |
+| **highest throughput** | the most audio finished under sustained load | audio seconds per wall second across a batch |
+| **highest speed** | the fastest single run | audio seconds per wall second and tokens per second on one clip |
+| **lowest latency** | text appears as soon as possible | time to first text, live draft delay, settle delay |
 
 it ships as a swift sdk and a swiftui mac app.
 
@@ -10,11 +17,11 @@ it ships as a swift sdk and a swiftui mac app.
 
 ## goals, in order
 
-1. **same accuracy as the reference.** the output must match hugging face transformers running the original weights, exactly or very nearly.
-2. **fastest possible.** among exact paths, the fastest one wins. the cpu, gpu and neural engine (npu) are only means to that.
+1. **same accuracy as the reference.** the output must match hugging face transformers running the original weights, exactly, on the three golden clips.
+2. **highest throughput, highest speed, lowest latency.** only exact paths compete. the cpu, gpu and neural engine (npu) are only means to that.
 3. **three modes:** `transcribe` (a file), `record` (capture, then transcribe), `listen` (live text while you speak).
 4. **great defaults, everything exposed.** it works with zero config, and every knob is public.
-5. **a mac app** in native swiftui with liquid glass, dark only.
+5. **a mac app** in native swiftui with liquid glass, dark only, for macos 26 or later.
 
 ## rules
 
@@ -27,7 +34,52 @@ it ships as a swift sdk and a swiftui mac app.
 - **measure, don't assume.** only a trace proves where something ran.
 - **license:** the engine, sdk and app are [cc by-nc 4.0](https://creativecommons.org/licenses/by-nc/4.0/), the same as the weights. all of it is non-commercial and requires attribution.
 - **all lowercase.** every piece of text the app renders is lowercase, including labels, menus, errors and transcripts, and so is all markdown prose. code identifiers, paths, urls and license text keep their case.
-- **lowercase is display only.** the sdk returns the model's exact text, so the golden gates still compare true output. copy and export also keep the exact text.
+- **lowercase is display only.** the sdk returns the model's exact text, so the golden test still compares true output. copy and export also keep the exact text.
+
+## how we work
+
+**the mindset: hill-climb everything.** nobody needs to know the final design up front. we need a direction, a score and a fast loop. attempts are cheap, a failed attempt is information, and only a measured gain moves us uphill.
+
+**the loop:**
+
+1. **pick one number** with a concrete target, such as "make encoder blocks 2x faster", never just "optimize".
+2. **start from the current best,** with its score on record.
+3. **make one bet,** with a stated reason it should help.
+4. **try it in a fresh agent** in its own git worktree.
+5. **run the golden test.** accuracy first, speed second.
+6. **keep it or drop it.** keep only if it is exact and beats noise. log the result either way.
+7. **climb again** from the new best.
+
+**getting off a local peak:** when small bets stop paying, run a few big jumps in parallel, such as another engine, another chip split or a clean rewrite of one stage. a jump can look worse at first, so it gets a short budget to climb before it is judged.
+
+**the orchestrator is fable.** it owns the goal, the scoreboard and the next bets. it spawns subagents, hands each a short brief with one target, and lands only work that passes the golden test. it stays out of bulk implementation so its context stays clean.
+
+**subagents are spawned as needed.** use the cheapest model likely to get the job done, and move up when it fails.
+
+| model | use it for |
+|---|---|
+| **haiku** | searching, reading logs, mechanical edits, running and summarizing golden runs |
+| **sonnet** | routine implementation, harness work, app ui |
+| **opus** | hard implementation: metal, core ml conversion, concurrency, the decoder |
+| **fable** | orchestration, architecture, numeric mismatches and problems others could not solve |
+
+**swarm rules:**
+
+- **one agent, one question, one worktree.** parallel work never shares files.
+- **timing runs go one at a time.** agents can build and explore in parallel, but a speed or energy number only counts from a quiet machine. golden runs go through one queue.
+- **fresh context beats a long thread.** after about five rounds of back and forth, or two failed fixes, stop and restart with the lessons and the errors.
+- **state lives in the repo, not in chat.** the scoreboard and every try go in `docs/performance.md`, so any new agent can pick up from there.
+- **agents cannot move the goalposts.** no agent may edit the golden set, loosen the golden test or change how it measures to get a win. those changes need the owner.
+- **show the climb.** speed and accuracy are plotted over time like a loss curve, with each stage measured end to end.
+- **one test, no others.** agents do not write unit tests or new test suites. time goes into the engine and the golden test.
+- **the owner stays on decisions.** goals, license, going public, and anything hard to undo come back as one clear question at a time.
+
+**what we take from the two posts:**
+
+- **[effective swarm riding for engineers](https://www.paradigm.xyz/writing/swarms)** by georgios konstantopoulos: short prompts with concrete targets, tune the environment, differential testing against a reference, no unit tests, no ci, measure every component, a monorepo with few dependencies, and let the swarm run while the human gets out of the way.
+- **[you're vibe coding wrong](https://edwardahn.me/archive/2026/04/21/VibeCodingWrong)** by edward ahn: building is search, failed attempts are information, restart often to avoid context rot, carry lessons forward, and treat a clean one-shot as a sign the problem is understood.
+
+**what we deliberately do not take:** deleting `docs/`, removing all comments, or skipping orchestration. this project runs long and is meant to go public, so it keeps its measurement log and a light orchestrator.
 
 ## the model
 
@@ -40,9 +92,10 @@ confirmed from its source code.
 | **encoder** | 24 layers, 314m params. attention only sees its own 8-second block |
 | **projector** | linear, gelu, linear |
 | **decoder** | qwen3, 28 layers, 1.72b params, one token at a time with a key/value cache |
-| **defaults** | beam search with 3 beams, up to 512 new tokens |
+| **defaults** | beam search with 3 beams, up to 512 new tokens, no repeated 8-grams, 32,253 banned tokens, two stop tokens |
+| **input details** | the prompt prefill and short-clip padding are matched to the transformers processor |
 
-**why the blocks matter:** fixed 1-second and 8-second blocks can run in parallel, and a finished block never changes, so live mode can cache it.
+**why the blocks matter:** fixed 1-second and 8-second blocks can run in parallel. the mel floor comes from the loudest point in the clip, so a cached block stays valid only until a louder frame raises that floor.
 
 ## placement: an open search
 
@@ -50,8 +103,8 @@ every stage is built so it can run on more than one chip. the best mix is found 
 
 **how a placement wins, in order:**
 
-1. **it is exact.** it passes every accuracy gate, or it is out.
-2. **it is the fastest.** throughput for files, shortest delay for live text.
+1. **it is exact.** it passes the golden test, or it is out.
+2. **it wins the number that matters for the task.** highest throughput for batches, highest speed for a single file, lowest latency for live text.
 3. **on a tie, the npu wins.** a tie means within measurement noise, and the npu usually uses less power and leaves the gpu free.
 
 | stage | candidates |
@@ -59,16 +112,16 @@ every stage is built so it can run on more than one chip. the best mix is found 
 | audio decode, resample, mel | cpu |
 | conv front, encoder, projector | npu, gpu, cpu, or split between them |
 | token table lookup | cpu |
-| decoder | gpu, npu, cpu, or split by layers |
+| decoder | gpu first, then npu or cpu, kept whole on one chip |
 | output head | with the decoder, or on its own chip |
 | search and text | cpu |
 
 **what gets tried:**
 
 - **each stage on each chip,** alone.
-- **mixes:** for example npu encoder with gpu decoder, all gpu, all npu, or a decoder split across two chips.
+- **mixes:** for example npu encoder with gpu decoder, all gpu, or all npu.
 - **overlap:** one chip encodes the next block while another decodes the current one.
-- **different ways to run the same chip:** core ml, hand-written metal, accelerate on the cpu, and the private neural engine api as an experiment.
+- **different ways to run the same chip:** mpsgraph and hand-written metal on the gpu, accelerate on the cpu, and core ml on the npu. the private neural engine api waits until after phase 9.
 
 **the best mix may differ by:**
 
@@ -80,43 +133,70 @@ every stage is built so it can run on more than one chip. the best mix is found 
 
 **starting hunches, to be tested, not trusted:** other projects report decoders this size run faster on the gpu than the npu, and encoders run about equally on both. the npu usually wins on power.
 
+**the decoder is limited by memory bandwidth.** each step reads about 3.4 gb in 16-bit or 6.9 gb in 32-bit. at the m4's 120 gb/s, that caps a single stream near 35 or 17 steps per second. this is an estimate until measured, and it shapes the design:
+
+- **batched beams are the base design,** sharing one audio prefix cache, because a batch reads the weights once per step.
+- **long files decode pieces in batches** for throughput.
+- **the decoder is not split across chips,** since they share the same memory.
+- **before writing converters,** a one-layer synthetic run on each chip measures the real ceiling.
+
 ## the engine
 
 - **a swift converter** reads the safetensors file and builds what each chip needs, once, on this machine.
 - **weights stay exact.** bf16 converts to 16-bit float without loss when values are in range. the converter counts any that are not.
-- **precision is the main accuracy risk.** the fast paths compute in 16-bit. where that changes the output, that stage moves to 32-bit or to another chip.
-- **no weight compression at first.** it is tried last, and kept only if accuracy holds.
+- **the first path is exact and simple.** one 32-bit path on mpsgraph or accelerate runs end to end before anything branches from it.
+- **core ml is scoped to the npu encoder,** with fixed 104-token windows and a mask. with no packages, its model format has to be written by hand, so it must earn that work.
+- **precision is the main accuracy risk.** the fast paths compute in 16-bit, and the npu is 16-bit only. where that changes the output, that stage moves to a 32-bit path on the gpu or cpu.
+- **no weight compression at first.** the source checkpoint is never changed. a compressed copy is tried last, and kept only if it passes the golden test.
 
 ## accuracy
 
-**the bar: the exact weights, and the exact same result as transformers on all three golden clips.**
+**the holy grail: one golden test, three audio clips, many dimensions.** there are no unit tests, no ci and no other test suites. if the golden test is right, the engine is right.
 
-- **the reference:** transformers running the pinned checkpoint in 32-bit float with the model's own default settings (3 beams).
-- **golden clips:** three fixed clips, short (about 3 s), medium (about 11 s) and long (a few minutes). harder ones are added later (noise, fast speech, silence) and never replace these.
+- **the reference:** transformers running the pinned checkpoint in 32-bit float on one recorded device and thread setup, with the model's own default settings.
+- **golden clips:** three fixed clips, short (about 3 s), medium (about 11 s) and long (about 2 minutes). each must finish in one pass under the model's 512-token limit, so the reference is complete and never chunked.
+- **what exact covers:** the claim is identical output on these clips. audio too long for one pass is split, which changes the model's input, so it is not claimed identical to a single reference pass.
 - **the golden reference set,** saved once and then frozen:
   - the three audio files and their hashes.
   - the checkpoint revision and hash, the transformers version and every setting used.
-  - per clip: mel, encoder output, first-step scores, token ids and final text.
-- **every later run is compared with this set,** so a result can always be traced back to it.
+  - per clip: mel, encoder output, scores and top-2 margin at every step, beam scores, token ids and final text.
 
-| gate | passes when |
+**must pass on all three clips.** one miss and the change is out:
+
+| dimension | passes when |
 |---|---|
-| weights | every converted value equals the checkpoint value |
-| mel | matches the reference within a tiny tolerance |
-| encoder | output matches closely |
-| decoder | the same top token at every step when fed the reference tokens |
-| end to end | **identical token ids and identical text on all three golden clips** |
-| wider check | word error on a few hundred clips within noise of the reference |
+| **tokens** | token ids are identical to the reference |
+| **text** | final text is identical to the reference |
+| **stop** | stops at the same token and the same length |
+| **repeatable** | repeat runs, cold and warm, give the same result |
+| **every placement** | each chip mix that can ship passes on its own |
+| **every mode** | file and recorded input match the reference |
+| **live replay** | played in at real speed, settled text is never taken back and the final equals the file result |
 
-- a change that fails a gate is not kept, however fast it is.
+**scored on all three clips.** these drive the hill-climb:
+
+| dimension | what it records |
+|---|---|
+| **throughput** | audio seconds per wall second across a sustained batch of the three clips |
+| **speed** | audio seconds per wall second and tokens per second on each clip |
+| **latency** | time to first text, live draft delay, settle delay |
+| **startup** | cold load, warm load |
+| **resources** | peak memory, energy, which chip ran each stage |
+| **live quality** | how often drafts change |
+| **safety margin** | the closest top-2 call, which shows how near a path is to flipping a token |
+
+**when it fails, it says where.** the saved mel, encoder output and step scores show the first stage that drifted. they are diagnostics, so only the final result decides pass or fail.
+
+- a change that fails the golden test is not kept, however fast it is.
 - **there is always one exact path.** if a fast 16-bit path cannot reproduce the reference, a slower 32-bit path that does is kept, and only exact paths can be defaults.
 
 ## speed: the hill-climb
 
 - **numbers tracked:** audio seconds per wall second, time to first text, live draft and final delay, tokens per second, load time, memory, energy.
-- **loop:** change one thing, run the golden clips, check the gates, keep it only if it is faster and still correct. log every try, kept or dropped.
-- **things to try:** placement mixes, parallel encoder blocks, batched beams, greedy against 3 beams, decoder splits, cache layout, 16-bit against 32-bit per stage, shared memory between chips, weight compression last.
-- **baselines to beat:** transformers on this mac, and the published 8-bit mlx build.
+- **loop:** change one thing, run the golden test, keep it only if it is faster and still correct. log every try, kept or dropped.
+- **things to try:** placement mixes, parallel encoder blocks, batched beams, greedy against 3 beams, cache layout, 16-bit against 32-bit per stage, shared memory between chips, weight compression last.
+- **baselines to beat:** transformers on this mac. the published 8-bit mlx build and q8 gguf are tracked as a separate, lower-precision class, because they are not exact.
+- **how numbers are taken:** release builds, a quiet machine in a nominal thermal state, cold and warm runs recorded apart, and the median of 5 repeats. a tie means within 3%.
 
 ## folder structure
 
@@ -129,10 +209,9 @@ FourierKit/
 ├── README.md                what it is, a quick start, results
 ├── LICENSE                  cc by-nc 4.0, for the code
 ├── NOTICE.md                the model's license and credits
-├── CONTRIBUTING.md          how to build, test and send changes
+├── CONTRIBUTING.md          how to build, run the golden test and send changes
 ├── CHANGELOG.md             what changed in each version
 ├── .gitignore               keeps weights, builds and private notes out
-├── .github/workflows/       builds and tests on every push
 ├── Package.swift            the FourierKit swift package, one module
 ├── Sources/FourierKit/      the sdk
 │   ├── Audio/               files, microphone, resampling, mel, voice activity
@@ -140,8 +219,7 @@ FourierKit/
 │   ├── Text/                tokenizer, prompt, greedy and beam search
 │   └── Speech/              the public api, the three modes, config, metrics
 ├── Tests/
-│   ├── FourierKitTests/     unit tests and the golden gates
-│   └── FourierBenchmarks/   speed and placement measurements for the hill-climb
+│   └── FourierKitTests/     the golden test, and nothing else
 ├── FourierPlayground/       the mac app, an xcode project that depends on FourierKit
 │   └── FourierPlayground/   views, state, settings, assets
 ├── golden/                  the frozen golden reference set
@@ -161,7 +239,7 @@ FourierKit/
 - **nothing private in the repo.** no local paths, no private repo names, no personal details. private working notes sit in an ignored folder.
 - **no copied code.** everything read as a reference is credited in `NOTICE.md` as inspiration only.
 - **the private neural engine api is fenced off.** it sits behind a build flag that is off by default, so the public kit builds and ships without it.
-- **anyone can reproduce the numbers.** the readme gives the exact commands, and the golden gates run from a clean clone.
+- **anyone can reproduce the numbers.** the readme gives the exact commands, and the golden test runs from a clean clone.
 - **clean history from the start.** small commits, no large files, no secrets, so the history can be published as it is.
 
 | part | what it is | who uses it |
@@ -171,25 +249,24 @@ FourierKit/
 
 **what replaces a command line tool:**
 
-- **checking:** the golden gates run with `swift test`.
-- **measuring:** the benchmarks are a test target, run the same way, and they write to the measurement log.
+- **checking and measuring:** one command, `swift test -c release`, runs the golden test and writes every dimension to the measurement log.
 - **converting:** the kit's `prepare()` downloads and converts the model, so no separate tool is needed.
 - **trying it by hand:** `FourierPlayground`.
 
 **why one repo:**
 
 - the kit and the app change together while the engine is being tuned, so one commit keeps them in step.
-- the golden set and the gates sit next to the code they check.
+- the golden set and its test sit next to the code they check.
 - the kit is a clean swift package at the repo root, so any app can depend on it directly.
 
 **rules that keep it clean:**
 
 - **the app uses only the public api.** if it needs something private, the api is missing a feature.
 - **one module, four folders.** `FourierKit` is a single import. inside it, `Speech` uses `Audio`, `Model` and `Text`, and they never reach back up.
-- **measuring code lives in the benchmark tests,** not in the kit.
+- **measuring code lives in the golden test,** not in the kit.
 - **the app is an xcode project,** because it needs a microphone permission, an icon and signing.
 - **weights and converted models are never in the repo.** they are downloaded and built into the user's application support folder.
-- **large golden files** (audio and saved tensors) are kept out of normal git history, with their hashes checked in.
+- **golden files:** the three clips live in git. the large saved tensors live on a private github release, with their hashes in git.
 
 ## the sdk
 
@@ -204,8 +281,9 @@ let recording = await recorder.stop()
 let text = try await speech.transcribe(recording)
 
 let live = try await speech.listen()                  // full schema in "listen, in detail"
-for try await event in live.events { /* settled and draft text */ }
-let final = try await live.finish()
+let ui = Task { for try await event in live.events { /* settled and draft text */ } }
+let final = try await live.finish()                   // ends the event stream
+try await ui.value
 ```
 
 `FourierKit` is one module. inside it:
@@ -228,7 +306,7 @@ let final = try await live.finish()
 
 ## the three modes
 
-- **transcribe:** split long audio at quiet points, encode blocks in parallel, decode, join. progress and cancel.
+- **transcribe:** audio that fits in one pass is never split, so it matches the reference path. longer audio is cut at quiet points by one deterministic splitter, each piece runs the exact path, and the pieces are joined. progress and cancel.
 - **record:** raw microphone capture with a live level, then the same path as transcribe.
 - **listen:** live text while you speak. it has its own section below.
 
@@ -238,11 +316,11 @@ the model is not a streaming model, so live text is built on top of it.
 
 **how it works:**
 
-- finished blocks are encoded once and cached.
-- every short step, only the newest audio is encoded and the current phrase is decoded again.
+- finished blocks are encoded once and cached. they are encoded again only if a louder frame raises the phrase's mel floor.
+- every short step, only the newest audio is encoded. settled tokens are prefilled, so only the unsettled tail is generated.
 - text that agrees across two passes becomes **settled**. the rest is the **draft**.
 - a pause ends the phrase, settles all of it and resets the window, so cost stays flat.
-- stopping runs one full final pass over the audio.
+- **the final:** a session that fits in one pass gets one exact pass, the same as the file path. a longer session uses the same splitter as files, with exact passes running in the background so `finish()` stays short.
 
 **promises the api makes:**
 
@@ -250,28 +328,39 @@ the model is not a streaming model, so live text is built on top of it.
 - **draft text can change or vanish** on any update. it is always the newest guess for audio after the settled part.
 - **drafts are optional.** with drafts off, or when nothing is uncertain, the draft is empty and only settled text arrives.
 - **`settled + draft` is always the best full text so far.**
-- **the final transcript** from `finish()` comes from the full final pass. it is the one to save.
+- **the final transcript** from `finish()` comes from the exact passes. its wording can differ from the live text, and it is the one to save.
 
 **the schema:**
 
 ```swift
 let live = try await speech.listen()            // or speech.listen(options)
 
-for try await event in live.events {
-    switch event {
-    case .started:                    break     // microphone is live
-    case .level(let level):           break     // input loudness, for a meter
-    case .speechStarted:              break     // voice detected
-    case .update(let update):         break     // new settled and draft text
-    case .phraseEnded(let phrase):    break     // a pause closed a phrase
-    case .warning(let warning):       break     // fell behind, input changed
-    case .finished(let transcript):   break     // final pass is done
+let ui = Task {
+    for try await event in live.events {
+        switch event {
+        case .started:                    break // microphone is live
+        case .level(let level):           break // input loudness, for a meter
+        case .speechStarted:              break // voice detected
+        case .update(let update):         break // new settled and draft text
+        case .phraseEnded(let phrase):    break // a pause closed a phrase
+        case .warning(let warning):       break // fell behind, input changed
+        }
     }
 }
 
-let transcript = try await live.finish()        // stop and get the final text
-live.cancel()                                   // stop and discard
+// when the user stops:
+let transcript = try await live.finish()        // stop, get the final text, end the stream
+try await ui.value
+
+// or, instead of finish():
+live.cancel()                                   // stop, discard, end the stream
 ```
+
+**stream rules:**
+
+- `.level` events are coalesced to the newest value. `.update` events are never dropped.
+- cancelling the task that reads events does not stop the session. only `finish()` or `cancel()` does.
+- the model runs one job at a time. a `transcribe` during `listen` waits, and live work goes first.
 
 ```swift
 struct LiveUpdate {
@@ -321,29 +410,29 @@ struct LiveUpdate {
 
 ## phases
 
-each phase ends with a check that must pass before the next starts.
+the golden test is the only automated check. once it passes in phase 4, it must keep passing.
 
 | # | phase | done when |
 |---|---|---|
 | 1 | **reference harness** | the golden reference set is saved and frozen for the three clips |
-| 2 | **cpu parts:** mel, tokenizer, prompt | mel and token ids pass their gates |
-| 3 | **converter and encoder** | encoder gate passes on at least two chips |
-| 4 | **decoder** | decoder and end-to-end gates pass on at least two chips |
-| 5 | **placement search and hill-climb** | fastest exact path found for each task, placement table built, every try logged, gates green |
+| 2 | **cpu parts:** mel, tokenizer, prompt | output lines up with the saved reference |
+| 3 | **converter and encoder** | encoder output lines up with the saved reference |
+| 4 | **decoder** | **the golden test passes end to end** on one exact path |
+| 5 | **placement search and hill-climb** | fastest exact path found for each task, placement table built, every try logged, golden test passes |
 | 6 | **sdk: transcribe and record** | the api works end to end on files and the microphone |
 | 7 | **sdk: listen** | settled text is never taken back, finals equal the file result, delay goals met, defaults frozen |
 | 8 | **app** | all three modes usable, settings wired, first run smooth |
-| 9 | **wider accuracy and energy** | word error and energy logged against the baselines |
+| 9 | **final scorecard** | every golden dimension logged against the baselines |
 
 ## what could go wrong
 
 - **16-bit math may change the text.** known trouble spots are the norm layers and long sums. fix by moving that stage to 32-bit, or by proven rescaling.
 - **exact match is hard for the fast paths.** a tiny numeric difference can flip a close call between two tokens. the bar does not move: that path is fixed, or it loses its place to the exact 32-bit path.
-- **cache bugs.** another project's port of this model family gave wrong output at certain cache lengths. every length is tested against the reference.
+- **cache bugs.** another project's port of this model family gave wrong output at certain cache lengths. the golden clips run through every cache length up to their full token count.
 - **the npu has size and shape limits.** reports disagree on how large one piece can be, so the limit is found by testing.
 - **more chips and engines mean more work.** build the simplest path per chip first, and write custom metal only where the numbers say it pays.
-- **beam search costs about 3x.** it is the reference default, so it stays unless greedy proves equal on the wider check.
-- **first run is slow.** a 4 gb download and a conversion. cache everything after.
+- **beam search costs more than greedy.** batching should keep it well under 3x. it is the reference default, so it stays unless greedy passes the golden test.
+- **first run is slow and large.** a 4 gb download and a conversion, and all variants can pass 16 gb. `prepare()` checks disk space first, resumes downloads and verifies the sha256. cache everything after.
 - **silent fallback.** core ml can move work to another chip without saying so. trace every stage.
 
 ## not known yet
@@ -356,9 +445,8 @@ each phase ends with a check that must pass before the next starts.
 
 - model: https://huggingface.co/oruk/oruk-fourier-2b
 - model source: https://github.com/huggingface/transformers/tree/main/src/transformers/models/qwen3_asr and https://github.com/QwenLM/Qwen3-ASR
-- vocule: `/Users/mac/code/vocule` and https://karanganesan.com/vocule/ for the three modes and the feel
-- voculekit: `karanganesan/VoculeKit` on github for the swift api shape, placement and energy ideas
-- compute-atlas: `/Users/mac/Desktop/untitled folder` for writing core ml from swift, tracing and measuring
+- private working references: `.private/references.md`, which stays out of git
 - fluidaudio and fluidvoice: https://github.com/FluidInference/FluidAudio and https://github.com/altic-dev/FluidVoice
 - apple: https://machinelearning.apple.com/research/neural-engine-transformers and https://machinelearning.apple.com/research/core-ml-on-device-llama
 - live mode: https://arxiv.org/html/2507.10860v1 and https://arxiv.org/html/2307.14743
+- how we work: https://www.paradigm.xyz/writing/swarms and https://edwardahn.me/archive/2026/04/21/VibeCodingWrong

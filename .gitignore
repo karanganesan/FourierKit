@@ -1,0 +1,15 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+
+# private working notes
+.private/
+
+# weights and converted models
+*.safetensors
+*.mlmodel
+*.mlpackage/
+*.mlmodelc/
+*.gguf
