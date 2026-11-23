@@ -1,6 +1,8 @@
 # fourier, native on apple silicon: plan
 
-a swift sdk and a swiftui mac app that run `oruk/oruk-fourier-2b` speech to text on this mac (apple m4, 32 gb), as fast as the machine allows, with the same accuracy as the original model.
+**the goal: the best inference engine for `oruk/oruk-fourier-2b` on this mac (apple m4, 32 gb), meaning the fastest one that still gets the same answer as the original model.**
+
+it ships as a swift sdk and a swiftui mac app.
 
 **status:** plan only. nothing is built or measured yet.
 
@@ -9,7 +11,7 @@ a swift sdk and a swiftui mac app that run `oruk/oruk-fourier-2b` speech to text
 ## goals, in order
 
 1. **same accuracy as the reference.** the output must match hugging face transformers running the original weights, exactly or very nearly.
-2. **fastest possible.** use the cpu, gpu and neural engine (npu) in whatever mix measures best.
+2. **fastest possible.** among exact paths, the fastest one wins. the cpu, gpu and neural engine (npu) are only means to that.
 3. **three modes:** `transcribe` (a file), `record` (capture, then transcribe), `listen` (live text while you speak).
 4. **great defaults, everything exposed.** it works with zero config, and every knob is public.
 5. **a mac app** in native swiftui with liquid glass, dark only.
@@ -21,8 +23,11 @@ a swift sdk and a swiftui mac app that run `oruk/oruk-fourier-2b` speech to text
 - **external things are references only.** nothing is copied and nothing becomes a dependency.
 - **python lives in one place:** a small harness that runs transformers to make the golden answers. it never ships.
 - **nothing is set in stone.** no chip, engine or trick is chosen in advance. the numbers choose.
+- **use the npu as needed.** it is tried for every stage and used wherever it is fastest or ties. it is never forced in at the cost of speed or accuracy.
 - **measure, don't assume.** only a trace proves where something ran.
 - **license:** the weights are cc by-nc 4.0, so this is non-commercial.
+- **all lowercase.** every piece of text the app renders is lowercase, including labels, menus, errors and transcripts, and so is all markdown prose. code identifiers, paths, urls and license text keep their case.
+- **lowercase is display only.** the sdk returns the model's exact text, so the golden gates still compare true output. copy and export also keep the exact text.
 
 ## the model
 
@@ -42,6 +47,12 @@ confirmed from its source code.
 ## placement: an open search
 
 every stage is built so it can run on more than one chip. the best mix is found by testing, and it can differ by task.
+
+**how a placement wins, in order:**
+
+1. **it is exact.** it passes every accuracy gate, or it is out.
+2. **it is the fastest.** throughput for files, shortest delay for live text.
+3. **on a tie, the npu wins.** a tie means within measurement noise, and the npu usually uses less power and leaves the gpu free.
 
 | stage | candidates |
 |---|---|
@@ -65,7 +76,7 @@ every stage is built so it can run on more than one chip. the best mix is found 
 - **clip length:** short clips are dominated by start-up cost, long ones by steady speed.
 - **power:** plugged in, on battery, or hot.
 
-**what ships:** a placement table built from the measurements. `automatic` reads it. `performance` and `efficiency` bias it. any stage can be pinned by hand.
+**what ships:** a placement table built from the measurements. `automatic` is the default and picks the fastest exact path for the task. `efficiency` is opt-in and favors lower power. any stage can be pinned by hand.
 
 **starting hunches, to be tested, not trusted:** other projects report decoders this size run faster on the gpu than the npu, and encoders run about equally on both. the npu usually wins on power.
 
@@ -299,6 +310,7 @@ struct LiveUpdate {
 ## the app: FourierPlayground
 
 - **look:** native swiftui, liquid glass controls floating over a black window, dark only, quiet motion.
+- **text:** everything on screen is lowercase, transcripts included.
 - **layout:** one window, three modes in a glass switcher.
 - **transcribe:** drop a file, see progress, read, copy or export the text.
 - **record:** one big button, a live waveform, then the transcript.
@@ -317,7 +329,7 @@ each phase ends with a check that must pass before the next starts.
 | 2 | **cpu parts:** mel, tokenizer, prompt | mel and token ids pass their gates |
 | 3 | **converter and encoder** | encoder gate passes on at least two chips |
 | 4 | **decoder** | decoder and end-to-end gates pass on at least two chips |
-| 5 | **placement search and hill-climb** | placement table built, every try logged, gates green |
+| 5 | **placement search and hill-climb** | fastest exact path found for each task, placement table built, every try logged, gates green |
 | 6 | **sdk: transcribe and record** | the api works end to end on files and the microphone |
 | 7 | **sdk: listen** | settled text is never taken back, finals equal the file result, delay goals met, defaults frozen |
 | 8 | **app** | all three modes usable, settings wired, first run smooth |
