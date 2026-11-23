@@ -30,7 +30,7 @@ it ships as a swift sdk and a swiftui mac app.
 - **external things are references only.** nothing is copied and nothing becomes a dependency.
 - **python lives in one place:** a small harness that runs transformers to make the golden answers. it never ships.
 - **nothing is set in stone.** no chip, engine or trick is chosen in advance. the numbers choose.
-- **use the npu as needed.** it is tried for every stage and used wherever it is fastest or ties. it is never forced in at the cost of speed or accuracy.
+- **npu first.** anywhere the npu can run a stage, it gets built and tried there first. it stays wherever it passes the golden test and is fastest or ties. accuracy is never traded for it.
 - **measure, don't assume.** only a trace proves where something ran.
 - **license:** the engine, sdk and app are [cc by-nc 4.0](https://creativecommons.org/licenses/by-nc/4.0/), the same as the weights. all of it is non-commercial and requires attribution.
 - **all lowercase.** every piece of text the app renders is lowercase, including labels, menus, errors and transcripts, and so is all markdown prose. code identifiers, paths, urls and license text keep their case.
@@ -107,14 +107,24 @@ every stage is built so it can run on more than one chip. the best mix is found 
 2. **it wins the number that matters for the task.** highest throughput for batches, highest speed for a single file, lowest latency for live text.
 3. **on a tie, the npu wins.** a tie means within measurement noise, and the npu usually uses less power and leaves the gpu free.
 
-| stage | candidates |
-|---|---|
-| audio decode, resample, mel | cpu |
-| conv front, encoder, projector | npu, gpu, cpu, or split between them |
-| token table lookup | cpu |
-| decoder | gpu first, then npu or cpu, kept whole on one chip |
-| output head | with the decoder, or on its own chip |
-| search and text | cpu |
+**npu first:** every stage that can run on the npu is built for it and tried there first.
+
+| stage | npu? | try in this order | why |
+|---|---|---|---|
+| audio file decode | no | cpu | file parsing and branching |
+| resample | try | npu, cpu | a fixed filter, but very small work |
+| mel | try | npu, cpu | fixed-size math, but the log and 16-bit precision may break exactness |
+| conv front | **yes** | npu, gpu, cpu | the best fit for the npu |
+| encoder | **yes** | npu, gpu, cpu | fixed 8-second blocks suit it well |
+| projector | **yes** | npu, gpu, cpu | runs with the encoder |
+| token table lookup | **yes** | npu, gpu, cpu | runs with the decoder |
+| decoder | **yes** | npu, gpu, cpu | the hardest fit: 16-bit only, size limits, and a key/value cache |
+| output head | **yes** | npu, gpu, cpu | runs with the decoder |
+| top-k of the scores | try | npu, gpu, cpu | can cut how much data comes back each step |
+| beam search, repeat and token bans | no | cpu | branching logic over changing state |
+| tokenizer and text | no | cpu | strings |
+
+on the npu, the decoder can be cut into several sequential pieces to fit its size limits.
 
 **what gets tried:**
 
@@ -129,7 +139,7 @@ every stage is built so it can run on more than one chip. the best mix is found 
 - **clip length:** short clips are dominated by start-up cost, long ones by steady speed.
 - **power:** plugged in, on battery, or hot.
 
-**what ships:** a placement table built from the measurements. `automatic` is the default and picks the fastest exact path for the task. `efficiency` is opt-in and favors lower power. any stage can be pinned by hand.
+**what ships:** a placement table built from the measurements. `automatic` is the default and picks the fastest exact path for the task. `npu` is opt-in and uses the npu at every stage where it passes the golden test, even if another chip is faster. `efficiency` is opt-in and favors lower power. any stage can be pinned by hand.
 
 **starting hunches, to be tested, not trusted:** other projects report decoders this size run faster on the gpu than the npu, and encoders run about equally on both. the npu usually wins on power.
 
@@ -145,7 +155,7 @@ every stage is built so it can run on more than one chip. the best mix is found 
 - **a swift converter** reads the safetensors file and builds what each chip needs, once, on this machine.
 - **weights stay exact.** bf16 converts to 16-bit float without loss when values are in range. the converter counts any that are not.
 - **the first path is exact and simple.** one 32-bit path on mpsgraph or accelerate runs end to end before anything branches from it.
-- **core ml is scoped to the npu encoder,** with fixed 104-token windows and a mask. with no packages, its model format has to be written by hand, so it must earn that work.
+- **core ml is the npu path for every npu stage.** the encoder comes first, with fixed 104-token windows and a mask, then the decoder with a stateful cache. with no packages, its model format has to be written by hand once, and every stage reuses that writer.
 - **precision is the main accuracy risk.** the fast paths compute in 16-bit, and the npu is 16-bit only. where that changes the output, that stage moves to a 32-bit path on the gpu or cpu.
 - **no weight compression at first.** the source checkpoint is never changed. a compressed copy is tried last, and kept only if it passes the golden test.
 
