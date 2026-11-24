@@ -106,11 +106,14 @@ public final class Fourier: Sendable {
             }
             if source.usesMicrophone { await runtime.setCapture(.on, inputUID: .some(options.inputDevice)) }
             // the engine warms while recording, so the transcript can start at once; never a download
-            if runtime.modelLooksPresent(options) {
+            let present = runtime.modelLooksPresent(options)
+            if present {
                 let options = options
                 Task.detached(priority: .utility) { try? await Runtime.shared.ensureReady(options) }
             }
-            return Recorder(input: input, usesMicrophone: source.usesMicrophone, job: job)
+            // drafts need the model. recording never starts a download for them.
+            return Recorder(input: input, usesMicrophone: source.usesMicrophone, job: job,
+                            drafts: present && options.recordDrafts ? options : nil)
         } catch {
             throw FourierError.wrap(error)
         }

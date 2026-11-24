@@ -199,6 +199,8 @@ struct RecordScreen: View {
         } else {
             switch record.phase {
             case .recording, .starting:
+                VStack(spacing: 0) {
+                if record.update != nil { StreamingText(update: record.update) }
                 VStack(spacing: 24) {
                     FourierLevelMeter(level: record.level, isActive: record.phase == .recording, barCount: 64, barWidth: 4, ink: .primary)
                         .frame(height: 96)
@@ -210,6 +212,7 @@ struct RecordScreen: View {
                     }
                 }
                 .padding(32)
+                }
             case .transcribing:
                 VStack(spacing: 0) {
                 StreamingText(update: record.update)
@@ -245,7 +248,7 @@ struct RecordScreen: View {
     }
 
     private func controls(_ record: RecordModel) -> some View {
-        FourierControlBar {
+        FourierControlBar(action: canRecord && record.phase != .transcribing ? { record.toggle() } : nil) {
             EmptyView()
         } center: {
             FourierMicButton(status: record.micStatus, diameter: 48, action: record.toggle) { status in

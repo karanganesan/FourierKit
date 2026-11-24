@@ -27,6 +27,7 @@ final class RecordModel {
     @ObservationIgnored var onFinish: ((Transcript) -> Void)?
     @ObservationIgnored private var recorder: Recorder?
     @ObservationIgnored private var levels: Task<Void, Never>?
+    @ObservationIgnored private var drafts: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
 
     var isRunning: Bool { phase != .idle }
@@ -81,6 +82,13 @@ final class RecordModel {
                 self.recorder = recorder
                 self.startedAt = Date()
                 self.phase = .recording
+                // draft text while recording. the exact transcript replaces it after stop.
+                self.drafts = Task {
+                    for await value in recorder.drafts {
+                        guard self.generation == generation, self.phase == .recording else { return }
+                        self.update = value
+                    }
+                }
                 self.levels = Task {
                     for await level in recorder.levels {
                         guard self.generation == generation else { return }

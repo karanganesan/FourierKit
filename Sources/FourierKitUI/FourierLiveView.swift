@@ -113,7 +113,7 @@ public struct FourierLiveView<Accessory: View>: View {
     }
 
     private func controls(state: FourierStateModel, listen: FourierListenModel) -> some View {
-        FourierControlBar {
+        FourierControlBar(action: canListen(state) && listen.phase != .finishing ? { listen.toggle() } : nil) {
             if listen.phase == .listening {
                 FourierLevelMeter(level: listen.level, isActive: true, barCount: 16)
                     .frame(width: 120, height: 24)

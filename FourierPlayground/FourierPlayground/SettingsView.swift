@@ -256,6 +256,13 @@ private struct AudioSettings: View {
                 Hint("cleanup applies to listen only. files and recordings go in untouched.")
             }
             Section {
+                Toggle("draft text while recording", isOn: $app.settings.recordDrafts)
+            } header: {
+                Text("record")
+            } footer: {
+                Text("quick passes show what has been heard so far. the transcript still comes from one exact pass after you stop.")
+            }
+            Section {
                 Toggle("cut long audio automatically", isOn: $app.settings.chunkingAutomatic)
                 if !app.settings.chunkingAutomatic {
                     LabeledContent("longest piece") {

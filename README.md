@@ -23,8 +23,8 @@ the golden test has two parts. one drives the engine and checks tokens, text, th
 
 ## requirements
 
-- a mac with apple silicon
-- macos 26 or later, xcode 27, swift 6
+- apple silicon: a mac on macos 26 or later, or an iphone or ipad on ios 26 or later with enough memory for the 4 gb model. checked on an m4 mac with 32 gb and an iphone 17 pro.
+- xcode 27, swift 6
 - disk and network for the first run. `prepare()` downloads the 4.08 gb checkpoint pinned to revision `8c2a8871f1304aa2f634da4fb95e24438c4945b9` and checks its sha256. the download resumes if it stops. nothing is bundled, and the weights are not in this repo.
 
 ## quick start
@@ -64,17 +64,21 @@ transcribe a file, samples or a recording. audio up to 120 s runs in one pass. l
 ```swift
 let job = speech.transcriptionJob(contentsOf: url)
 Task { for await fraction in job.progress { print(fraction) } }
+Task { for await update in job.updates { print(update.settled, update.draft) } }
 let transcript = try await job.result
 ```
 
-record raw microphone audio with a live level, then transcribe it the same way.
+record raw microphone audio with a live level and draft text, then transcribe it the same way.
 
 ```swift
 let recorder = try await speech.record()
+Task { for await update in recorder.drafts { print(update.text) } }
 // ... later
 let recording = await recorder.stop()
 let transcript = try await speech.transcribe(recording)
 ```
+
+all three modes show text while they work. what is settled never changes, a draft can, and the transcript each one returns at the end is the one to keep.
 
 listen for live text while you speak. `.update` events carry settled text, which only grows, and a draft, which can change. `finish()` returns the exact transcript.
 

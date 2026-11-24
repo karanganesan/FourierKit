@@ -290,13 +290,22 @@ let other = try await speech.transcribe(samples: samples, sampleRate: 48_000).te
 let watching = Task {
     for await fraction in job.progress { print(fraction) }   // 0...1, ends with the job
 }
+let reading = Task {
+    for await update in job.updates {                        // text while it is worked out
+        print(update.settled, update.draft)                  // settled never changes, draft may
+    }
+}
 // job.cancel() stops at the next piece boundary, and result then throws FourierError.cancelled
-let transcript = try await job.result
-await watching.value</code></pre>
+let transcript = try await job.result                        // the one to keep
+await watching.value
+await reading.value</code></pre>
+<p class="dim">progress moves through the whole job, also when the audio is one piece: a little for the encoder, a little for the prefill, then step by step against an estimate of how many words that much audio holds. <code>updates</code> carries the text so far: pieces that are finished, from the start of the audio, are <code>settled</code>, and what the engine has after that is <code>draft</code>. with beam search, the default, a draft can be rewritten before its piece ends. neither changes the transcript, which comes from <code>result</code>.</p>
 <div class="table-wrap" tabindex="0" role="region" aria-label="transcription job members"><table><thead><tr><th scope="col">member</th><th scope="col">what it does</th></tr></thead><tbody>
 <tr><th scope="row" class="mono"><code>let id: UUID</code></th><td>the same id the job has in <code>FourierState.jobs</code></td></tr>
 <tr><th scope="row" class="mono"><code>var progress: AsyncStream&lt;Double&gt;</code></th><td>fraction of the audio done, 0 to 1, newest value only. ends when the job ends.</td></tr>
 <tr><th scope="row" class="mono"><code>var fraction: Double</code></th><td>the latest fraction done</td></tr>
+<tr><th scope="row" class="mono"><code>var updates: AsyncStream&lt;TranscriptionUpdate&gt;</code></th><td>the text so far, newest value only: <code>settled</code>, <code>draft</code> and <code>text</code>. ends when the job ends.</td></tr>
+<tr><th scope="row" class="mono"><code>var latestUpdate: TranscriptionUpdate?</code></th><td>the newest update, nil before any text</td></tr>
 <tr><th scope="row" class="mono"><code>var result: Transcript { get async throws }</code></th><td>waits for the transcript. errors are <code>FourierError</code> values.</td></tr>
 <tr><th scope="row" class="mono"><code>func cancel()</code></th><td>stops at the next piece boundary</td></tr>
 </tbody></table></div>
@@ -329,15 +338,24 @@ await watching.value</code></pre>
 let meter = Task {
     for await level in recorder.levels { print(level) }   // 0 (silence) to 1 (full scale)
 }
+let reading = Task {
+    for await update in recorder.drafts {                 // draft text while recording
+        print(update.settled, update.draft)
+    }
+}
 // ... later
 let recording = await recorder.stop()
 await meter.value
-let transcript = try await speech.transcribe(recording)</code></pre>
+await reading.value
+let transcript = try await speech.transcribe(recording)  // one exact pass, the one to keep</code></pre>
+<p class="dim">while recording, quick greedy passes run over the raw audio so far and arrive on <code>drafts</code>. a stretch longer than 20 s is cut at a quiet point and set aside as <code>settled</code>, so a pass never grows with the recording. the drafts are not the transcript: that comes from <code>transcribe</code> on the recording and may word things differently. set <code>options.recordDrafts = false</code> to record without them. they need the model on the device, and recording never starts a download for them.</p>
 <div class="table-wrap" tabindex="0" role="region" aria-label="record signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
 <tr><th scope="row" class="mono"><code>func record() async throws -&gt; Recorder</code></th><td>starts capture from <code>options.audioSource</code>, the system microphone by default</td></tr>
 <tr><th scope="row" class="mono"><code>Recorder.id: UUID</code></th><td>the job id in <code>FourierState.jobs</code></td></tr>
 <tr><th scope="row" class="mono"><code>Recorder.levels: AsyncStream&lt;Float&gt;</code></th><td>input loudness for a meter, 0 to 1, newest value only. ends when recording stops.</td></tr>
 <tr><th scope="row" class="mono"><code>Recorder.level: Float</code></th><td>the newest level</td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.drafts: AsyncStream&lt;TranscriptionUpdate&gt;</code></th><td>draft text for what has been heard so far, newest value only. ends when recording stops.</td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.latestDraft: TranscriptionUpdate?</code></th><td>the newest draft, nil before any text</td></tr>
 <tr><th scope="row" class="mono"><code>Recorder.duration: Duration</code></th><td>audio captured so far</td></tr>
 <tr><th scope="row" class="mono"><code>Recorder.startedAt: Date</code></th><td>when capture began</td></tr>
 <tr><th scope="row" class="mono"><code>func stop() async -&gt; Recording</code></th><td>stops capture and returns everything recorded. calling it again returns the same recording.</td></tr>
@@ -587,6 +605,7 @@ let speech = Fourier(options)</code></pre>
 <tr><th scope="row" class="mono"><code>gain</code></th><td><code>Gain</code></td><td><code>.automatic</code></td><td>forwards to <code>listen.gain</code></td></tr>
 <tr><th scope="row" class="mono"><code>speechDetector</code></th><td><code>(any SpeechDetecting)?</code></td><td><code>nil</code></td><td>forwards to <code>listen.speechDetector</code>. nil uses the built-in energy gate.</td></tr>
 <tr><th scope="row" class="mono"><code>preRoll</code></th><td><code>Duration</code></td><td><code>.milliseconds(500)</code></td><td>forwards to <code>listen.preRoll</code>. audio kept from before speech starts.</td></tr>
+<tr><th scope="row" class="mono"><code>recordDrafts: Bool</code></th><td><code>true</code></td><td>show draft text while recording. the transcript still comes from one exact pass after <code>stop()</code>.</td></tr>
 <tr><th scope="row" class="mono"><code>keepWarm</code></th><td><code>KeepWarm</code></td><td><code>.automatic</code></td><td>how long the model stays loaded</td></tr>
 <tr><th scope="row" class="mono"><code>permissions</code></th><td><code>PermissionHandling</code></td><td><code>.automatic</code></td><td>who asks for the microphone</td></tr>
 <tr><th scope="row" class="mono"><code>model</code></th><td><code>ModelOptions</code></td><td><code>ModelOptions()</code></td><td>where the model is stored and which revision</td></tr>

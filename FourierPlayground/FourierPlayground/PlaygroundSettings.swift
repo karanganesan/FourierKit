@@ -55,6 +55,7 @@ struct PlaygroundSettings: Codable, Equatable {
     var gainAutomatic = true
     var gainDecibels = 0.0
     var preRollMilliseconds = 500.0
+    var recordDrafts = true
 
     // listen
     var drafts = true
@@ -100,6 +101,7 @@ struct PlaygroundSettings: Codable, Equatable {
         options.echoCancellation = AudioSwitch(rawValue: echoCancellation.rawValue) ?? .automatic
         options.gain = gainAutomatic ? .automatic : .fixed(decibels: Float(gainDecibels))
         options.preRoll = .milliseconds(Int(preRollMilliseconds))
+        options.recordDrafts = recordDrafts
 
         options.listen.drafts = drafts
         options.listen.updateInterval = updateAutomatic ? .automatic : .fixed(.milliseconds(Int(updateMilliseconds)))

@@ -43,6 +43,9 @@ public struct FourierOptions: Sendable {
     }
 
     // lifecycle
+    /// show draft text while recording. quick passes run over the audio so far; the transcript of
+    /// the recording still comes from one exact pass after `stop()`, and is not changed by them.
+    public var recordDrafts = true
     public var keepWarm: KeepWarm = .automatic
     public var permissions: PermissionHandling = .automatic
 

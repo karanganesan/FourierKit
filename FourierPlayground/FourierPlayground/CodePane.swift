@@ -82,6 +82,7 @@ enum CodeSnippets {
             lines.append("options.echoCancellation = .\(settings.echoCancellation.rawValue)")
         }
         if !settings.gainAutomatic { lines.append("options.gain = .fixed(decibels: \(number(settings.gainDecibels)))") }
+        if settings.recordDrafts != base.recordDrafts { lines.append("options.recordDrafts = \(settings.recordDrafts)") }
         if settings.preRollMilliseconds != base.preRollMilliseconds {
             lines.append("options.preRoll = .milliseconds(\(Int(settings.preRollMilliseconds)))")
         }
@@ -141,22 +142,44 @@ enum CodeSnippets {
         switch mode {
         case .transcribe:
             """
-            let transcript = try await speech.transcribe(contentsOf: url)
+            let job = speech.transcriptionJob(contentsOf: url)
+
+            // text as it is worked out: settled never changes, draft may
+            Task {
+                for await update in job.updates {
+                    print(update.settled, update.draft)
+                }
+            }
+            // 0 to 1, moving through the whole file
+            Task {
+                for await fraction in job.progress { print(fraction) }
+            }
+
+            let transcript = try await job.result     // the one to keep
             print(transcript.text)
 
-            // or with progress and cancel
-            let job = speech.transcriptionJob(contentsOf: url)
-            for await fraction in job.progress { print(fraction) }
-            let result = try await job.result
+            // or, when you only want the result
+            let same = try await speech.transcribe(contentsOf: url)
             """
         case .record:
             """
             let recorder = try await speech.record()
-            for await level in recorder.levels { /* draw a meter */ }
 
-            // when the user stops:
+            // while recording: a level for a meter, and draft text
+            Task {
+                for await level in recorder.levels { /* draw a meter */ }
+            }
+            Task {
+                for await update in recorder.drafts {
+                    print(update.settled, update.draft)
+                }
+            }
+
+            // when the user stops: the raw audio, then one exact pass over it
             let recording = await recorder.stop()
-            let transcript = try await speech.transcribe(recording)
+            let job = speech.transcriptionJob(recording)
+            for await update in job.updates { print(update.text) }
+            let transcript = try await job.result     // the one to keep
             print(transcript.text)
             """
         case .listen:

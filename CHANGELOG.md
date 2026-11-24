@@ -8,6 +8,7 @@
 - in full screen the toolbar steps aside, so no bar is drawn behind it.
 - a file that fits in one pass now reports progress all the way through: the encoder, the prefill, then every decoder step against an estimate of its length.
 - `TranscriptionJob.updates` streams the text of a file or a recording while it is transcribed: finished pieces settled, the rest a draft. the playground shows it.
+- `Recorder.drafts` shows draft text while recording, from quick passes over the audio so far. `options.recordDrafts` turns it off. the transcript still comes from one exact pass after stop.
 - checked on an iphone 17 pro: the three golden clips give the reference text, at 2.9x, 3.9x and 4.3x realtime from a fresh launch.
 
 ## 0.0.2

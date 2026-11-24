@@ -157,12 +157,17 @@ public struct FourierControlBar<Leading: View, Center: View, Trailing: View>: Vi
     private let leading: Leading
     private let center: Center
     private let trailing: Trailing
+    private let action: (() -> Void)?
 
+    /// - parameter action: when given, a click or a tap anywhere on the bar runs it, so the whole
+    ///   capsule is the target and not only the button inside it
     public init(
+        action: (() -> Void)? = nil,
         @ViewBuilder leading: () -> Leading,
         @ViewBuilder center: () -> Center,
         @ViewBuilder trailing: () -> Trailing
     ) {
+        self.action = action
         self.leading = leading()
         self.center = center()
         self.trailing = trailing()
@@ -178,5 +183,7 @@ public struct FourierControlBar<Leading: View, Center: View, Trailing: View>: Vi
         .padding(.trailing, 24)
         .frame(height: FourierGlass.barHeight)
         .fourierGlass(in: .capsule)
+        .contentShape(.capsule)
+        .onTapGesture { action?() }
     }
 }
