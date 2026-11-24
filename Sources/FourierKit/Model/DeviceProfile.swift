@@ -162,7 +162,7 @@ struct EngineLimits: Sendable, Hashable {
         return floats * 4
     }
 
-    /// the work buffers kept for one piece of `seconds`: its prefill, its encoder, the conv groups,
+    /// the work buffers kept for one piece of `seconds`: its prefill, its encoder, the conv groups and flattened rows,
     /// a full decoder step and the 64 mb widened-weight buffer. they are all held at once.
     static func scratchBytes(shape: ModelShape, seconds: Int, convGroup: Int, convBytesPerChunk: Int, stepRows: Int) -> Int {
         let audio = LogMel.audioTokenCount(frames: seconds * 100)
@@ -171,8 +171,12 @@ struct EngineLimits: Sendable, Hashable {
         let prefill = rows * 4 * (6 * shape.width + 2 * shape.keyWidth + 2 * shape.inner + shape.heads * context)
         let window = (shape.windowTokens + 63) / 64 * 64
         let encoder = audio * 4 * (7 * shape.encoderWidth + shape.encoderInner + shape.encoderHeads * window + shape.audioWidth)
+        // the conv front's flattened rows for the whole clip, which feed one product (2 min: 48 mb)
+        var height = shape.melBins
+        for _ in 0..<3 { height = (height - 1) / 2 + 1 }
+        let flattened = seconds * shape.tokensPerChunk * shape.convChannels * height * 4
         let step = stepRows * 4 * (shape.vocabulary + 8 * shape.width + 2 * shape.inner + shape.heads * 4096)
-        return prefill + encoder + convGroup * convBytesPerChunk + step + (64 << 20)
+        return prefill + encoder + flattened + convGroup * convBytesPerChunk + step + (64 << 20)
     }
 
     static func gigabytes(_ bytes: Int) -> String {

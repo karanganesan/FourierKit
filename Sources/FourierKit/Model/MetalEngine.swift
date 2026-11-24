@@ -62,7 +62,93 @@ struct ModelShape: Sendable {
         guard shape.audioWidth == shape.width else {
             throw EngineFailure.badConfig("the audio projector width does not match the decoder width")
         }
+        // what the kernels assume about the sizes: whole quads, whole runs of 64, grouped heads
+        guard shape.heads * shape.headDim == shape.width else {
+            throw EngineFailure.badConfig("heads × head_dim (\(shape.heads) × \(shape.headDim)) is not hidden_size \(shape.width)")
+        }
+        guard shape.keyHeads > 0, shape.heads % shape.keyHeads == 0 else {
+            throw EngineFailure.badConfig("\(shape.heads) attention heads do not split into \(shape.keyHeads) key heads")
+        }
+        guard shape.width % 64 == 0, shape.headDim % 8 == 0, shape.inner % 8 == 0 else {
+            throw EngineFailure.badConfig("hidden_size must be a multiple of 64, head_dim and intermediate_size of 8")
+        }
+        guard shape.encoderHeads > 0, shape.encoderWidth % shape.encoderHeads == 0, (shape.encoderWidth / shape.encoderHeads) % 4 == 0,
+              shape.encoderWidth % 4 == 0, shape.encoderInner % 4 == 0 else {
+            throw EngineFailure.badConfig("the audio encoder's d_model does not split into \(shape.encoderHeads) heads of whole quads")
+        }
         return shape
+    }
+
+    /// every tensor the engine reads, with the shape the config implies
+    func expectedTensors() -> [String: [Int]] {
+        var heights = melBins
+        for _ in 0..<3 { heights = (heights - 1) / 2 + 1 }
+        var expected: [String: [Int]] = [:]
+        let conv = "model.audio_tower."
+        expected[conv + "conv2d1.weight"] = [convChannels, 1, 3, 3]
+        expected[conv + "conv2d2.weight"] = [convChannels, convChannels, 3, 3]
+        expected[conv + "conv2d3.weight"] = [convChannels, convChannels, 3, 3]
+        for name in ["conv2d1", "conv2d2", "conv2d3"] { expected[conv + name + ".bias"] = [convChannels] }
+        expected[conv + "conv_out.weight"] = [encoderWidth, convChannels * heights]
+        for layer in 0..<encoderLayers {
+            let p = conv + "layers.\(layer)."
+            for name in ["self_attn_layer_norm", "final_layer_norm"] {
+                expected[p + name + ".weight"] = [encoderWidth]
+                expected[p + name + ".bias"] = [encoderWidth]
+            }
+            for name in ["q_proj", "k_proj", "v_proj", "out_proj"] {
+                expected[p + "self_attn." + name + ".weight"] = [encoderWidth, encoderWidth]
+                expected[p + "self_attn." + name + ".bias"] = [encoderWidth]
+            }
+            expected[p + "fc1.weight"] = [encoderInner, encoderWidth]
+            expected[p + "fc1.bias"] = [encoderInner]
+            expected[p + "fc2.weight"] = [encoderWidth, encoderInner]
+            expected[p + "fc2.bias"] = [encoderWidth]
+        }
+        expected[conv + "ln_post.weight"] = [encoderWidth]
+        expected[conv + "ln_post.bias"] = [encoderWidth]
+        expected["model.multi_modal_projector.linear_1.weight"] = [encoderWidth, encoderWidth]
+        expected["model.multi_modal_projector.linear_1.bias"] = [encoderWidth]
+        expected["model.multi_modal_projector.linear_2.weight"] = [audioWidth, encoderWidth]
+        expected["model.multi_modal_projector.linear_2.bias"] = [audioWidth]
+        let text = "model.language_model."
+        expected[text + "embed_tokens.weight"] = [vocabulary, width]
+        expected[text + "norm.weight"] = [width]
+        for layer in 0..<decoderLayers {
+            let p = text + "layers.\(layer)."
+            expected[p + "input_layernorm.weight"] = [width]
+            expected[p + "post_attention_layernorm.weight"] = [width]
+            expected[p + "self_attn.q_proj.weight"] = [heads * headDim, width]
+            expected[p + "self_attn.k_proj.weight"] = [keyWidth, width]
+            expected[p + "self_attn.v_proj.weight"] = [keyWidth, width]
+            expected[p + "self_attn.o_proj.weight"] = [width, heads * headDim]
+            expected[p + "self_attn.q_norm.weight"] = [headDim]
+            expected[p + "self_attn.k_norm.weight"] = [headDim]
+            expected[p + "mlp.gate_proj.weight"] = [inner, width]
+            expected[p + "mlp.up_proj.weight"] = [inner, width]
+            expected[p + "mlp.down_proj.weight"] = [width, inner]
+        }
+        return expected
+    }
+
+    /// checks every tensor the engine reads against the config: present, bf16, the right shape and
+    /// exactly two bytes per value. the kernels take their sizes from the config alone, so a
+    /// mismatch would read past a tensor or misread it rather than fail.
+    func validate(_ weights: SafeTensors) throws {
+        for (name, shape) in expectedTensors().sorted(by: { $0.key < $1.key }) {
+            guard let tensor = weights.tensors[name] else {
+                throw EngineFailure.badConfig("the weights have no tensor named \(name)")
+            }
+            guard tensor.dtype == "BF16" else {
+                throw EngineFailure.badConfig("\(name) is \(tensor.dtype.lowercased()), and the engine reads raw bf16")
+            }
+            guard tensor.shape == shape else {
+                throw EngineFailure.badConfig("\(name) has shape \(tensor.shape), and config.json implies \(shape)")
+            }
+            guard tensor.byteCount == shape.reduce(1, *) * 2 else {
+                throw EngineFailure.badConfig("\(name) holds \(tensor.byteCount) bytes, not the \(shape.reduce(1, *) * 2) its shape needs")
+            }
+        }
     }
 }
 
@@ -115,8 +201,9 @@ final class MetalEngine: @unchecked Sendable {
     private var pipelines: [String: MTLComputePipelineState] = [:]
     private var scratch: [String: MTLBuffer] = [:]
     private var multiplies: [String: MPSMatrixMultiplication] = [:]
-    /// from this many rows up, a multiply goes to apple's kernel on 32-bit copies of the weights
-    /// made on the fly. below it, the bandwidth kernel reads the raw 16-bit weights.
+    /// from this many rows up, a per-piece multiply (prefill, encoder) goes to apple's kernel on
+    /// 32-bit copies of the weights made on the fly. below it, and always in a decoder step, the
+    /// bandwidth kernel reads the raw 16-bit weights.
     var wideRows = 32
     /// from this many prompt rows up, prefill attention uses the matrix kernel over the whole square
     var squareRows = 64
@@ -136,6 +223,8 @@ final class MetalEngine: @unchecked Sendable {
 
     /// seconds the gpu spent inside calls, for the busy share in live stats
     private(set) var gpuSeconds: Double = 0
+    /// the gpu's own clock for the last `run`: first kernel start to last kernel end
+    private(set) var lastGPUTime: Double = 0
 
     /// - parameter settings: the generation defaults, which size the decoder cache
     /// - parameter slotCapacity: overrides the cache size derived from the device
@@ -151,8 +240,9 @@ final class MetalEngine: @unchecked Sendable {
         self.shape = shape
         weights = try SafeTensors(url: modelDirectory.appendingPathComponent("model.safetensors"))
         for (name, tensor) in weights.tensors where tensor.dtype != "BF16" {
-            throw EngineFailure.badConfig("\(name) is \(tensor.dtype), and the engine reads raw bf16")
+            throw EngineFailure.badConfig("\(name) is \(tensor.dtype.lowercased()), and the engine reads raw bf16")
         }
+        try shape.validate(weights)
         deviceProfile = DeviceProfile.measure(device: device)
         limits = try EngineLimits(
             profile: deviceProfile, shape: shape, mappedLength: weights.mappedLength, weightBytes: weights.fileLength, settings: settings)
@@ -238,6 +328,12 @@ final class MetalEngine: @unchecked Sendable {
         return made
     }
 
+    /// the buffer for a matrix's 32-bit copy, at least `bytes` long (64 mb covers every matrix
+    /// but the output head, which never runs on apple's kernel)
+    fileprivate func wideScratch(bytes: Int) throws -> MTLBuffer {
+        try scratch("wide.weights", bytes: max(bytes, 64 << 20))
+    }
+
     func releaseScratch(prefix: String) {
         scratch = scratch.filter { !$0.key.hasPrefix(prefix) }
     }
@@ -301,6 +397,7 @@ final class MetalEngine: @unchecked Sendable {
             commandBuffer.commit()
         }
         gpuSeconds += Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9
+        lastGPUTime = commandBuffer.gpuEndTime - commandBuffer.gpuStartTime
         if let error = commandBuffer.error { throw EngineFailure.gpu(error.localizedDescription) }
     }
 
@@ -316,6 +413,7 @@ final class MetalEngine: @unchecked Sendable {
             for buffer in buffers { buffer.commit() }
         }
         gpuSeconds += Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9
+        lastGPUTime = last.gpuEndTime - buffers[0].gpuStartTime
         for buffer in buffers {
             if let error = buffer.error { throw EngineFailure.gpu(error.localizedDescription) }
         }
@@ -435,9 +533,16 @@ final class Pass {
     }
 
     /// y[n] = w x[n] + bias for `count` rows
-    func gemm(weight w: WeightRef, bias: WeightRef? = nil, rows: Int, cols: Int, x: Span, xStride: Int? = nil, y: Span, yStride: Int? = nil, count: Int) {
+    ///
+    /// which kernel runs depends only on the shape, `count` and `matrix`, never on what memory is
+    /// free: a failed allocation throws rather than fall back to a kernel with other rounding.
+    /// - parameter matrix: allows apple's matrix kernel. only for per-piece passes (prefill, encoder):
+    ///   its bits for a row depend on the row count, so a decoder step must never use it.
+    func gemm(weight w: WeightRef, bias: WeightRef? = nil, rows: Int, cols: Int, x: Span, xStride: Int? = nil, y: Span, yStride: Int? = nil,
+              count: Int, matrix: Bool = false) throws {
         guard count > 0 else { return }
-        if count >= engine.wideRows, cols >= 16, let wide = try? engine.scratch("wide.weights", bytes: 64 << 20), rows * cols * 4 <= wide.length {
+        if matrix, count >= engine.wideRows, cols >= 16 {
+            let wide = try engine.wideScratch(bytes: rows * cols * 4)
             var pipeline = use("widen")
             weight(w, 0)
             bind(Span(wide), 1)
@@ -499,9 +604,9 @@ final class Pass {
         dispatch(pipeline, count)
     }
 
-    func rmsNorm(x: Span, y: Span, gain: WeightRef, dim: Int, count: Int, eps: Float) {
+    func rmsNorm(x: Span, y: Span, gain: WeightRef, dim: Int, count: Int, eps: Float) throws {
         precondition(dim % 64 == 0)
-        guard let partial = try? engine.scratch("norm.partial", bytes: count * (dim / 64) * 4) else { return }
+        let partial = try engine.scratch("norm.partial", bytes: count * (dim / 64) * 4)
         let shared = (UInt32(dim), UInt32(count), eps, UInt32(0))
         var pipeline = use("rms_partial")
         bind(x, 0)
@@ -551,7 +656,7 @@ final class Pass {
     /// softmax attention of each query row over its own context, written as one mixed value row per query.
     /// `maxContext` must be a multiple of 64: the softmax and the mix work in runs of 64 slots.
     func attention(q: Span, keys: Span, values: Span, contexts: Span, list: Span, scores: Span, y: Span,
-                   heads: Int, keyHeads: Int, headDim: Int, rows: Int, maxContext: Int) {
+                   heads: Int, keyHeads: Int, headDim: Int, rows: Int, maxContext: Int) throws {
         precondition(maxContext % 64 == 0)
         let scale = 1.0 / Float(headDim).squareRoot()
         let shared = (UInt32(heads), UInt32(keyHeads), UInt32(headDim), UInt32(rows), UInt32(maxContext), scale)
@@ -566,9 +671,8 @@ final class Pass {
         dispatch(pipeline, maxContext, heads, rows)
 
         let runs = maxContext / 64
-        guard let runMax = try? engine.scratch("attention.max", bytes: rows * heads * runs * 4),
-              let partial = try? engine.scratch("attention.partial", bytes: rows * heads * runs * (headDim + 4) * 4)
-        else { return }
+        let runMax = try engine.scratch("attention.max", bytes: rows * heads * runs * 4)
+        let partial = try engine.scratch("attention.partial", bytes: rows * heads * runs * (headDim + 4) * 4)
 
         pipeline = use("attention_run_max")
         bind(contexts, 2)
@@ -606,12 +710,12 @@ final class Pass {
     /// which is several times faster than the per-slot kernels once there are hundreds of rows.
     /// - parameter firstSlot: the cache slot of row 0. rows are in consecutive slots.
     func attentionSquare(q: Span, keys: Span, values: Span, contexts: Span, scores: Span, y: Span,
-                         heads: Int, keyHeads: Int, headDim: Int, rows: Int, maxContext: Int, firstSlot: Int) {
+                         heads: Int, keyHeads: Int, headDim: Int, rows: Int, maxContext: Int, firstSlot: Int) throws {
         precondition(maxContext % 64 == 0 && rows <= maxContext)
         let scale = 1.0 / Float(headDim).squareRoot()
         let shared = (UInt32(heads), UInt32(keyHeads), UInt32(headDim), UInt32(rows), UInt32(maxContext), scale)
         let runs = maxContext / 64
-        guard let runBuffer = try? engine.scratch("attention.max", bytes: rows * heads * runs * 4) else { return }
+        let runBuffer = try engine.scratch("attention.max", bytes: rows * heads * runs * 4)
         let keyWidth = keyHeads * headDim
         let group = heads / keyHeads
         func matrix(_ span: Span, extra: Int, rows: Int, columns: Int, stride: Int) -> MPSMatrix {

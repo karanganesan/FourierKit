@@ -31,8 +31,14 @@ extension MetalEngine {
     }
 
     /// conv front, 24 layers and the projector for one clip.
+    ///
+    /// the result does not depend on how many chunks share a conv command buffer: the three
+    /// convolutions run per chunk group (each value is one row of a matrix product whose row count
+    /// is a whole number of chunks × at least 208 cells, past where apple's kernel changes paths),
+    /// and the projection out of the conv front runs once over every chunk of the clip.
     /// - parameter mel: [bin][paddedFrame], padded with zeros to a whole number of 1-second chunks
-    func encode(mel: [Float], frames: Int, paddedFrames: Int) async throws -> AudioEmbedding {
+    /// - parameter group: chunks per conv command buffer, the device's `convGroup` unless given
+    func encode(mel: [Float], frames: Int, paddedFrames: Int, group: Int? = nil) async throws -> AudioEmbedding {
         let bins = shape.melBins
         let chunkFrames = shape.chunkFrames
         precondition(paddedFrames % chunkFrames == 0 && mel.count == bins * paddedFrames)
@@ -52,7 +58,7 @@ extension MetalEngine {
         }
         let cells = (0...3).map { heights[$0] * widths[$0] }
         let flat = channels * heights[3]
-        let group = limits.convGroup
+        let group = max(1, group ?? limits.convGroup)
 
         let x = try scratch("enc.x", bytes: chunks * perChunk * width * 4)
         let input = try scratch("enc.in", bytes: group * cells[0] * 4)
@@ -62,7 +68,7 @@ extension MetalEngine {
         let act2 = try scratch("enc.a2", bytes: group * cells[2] * channels * 4)
         let patch3 = try scratch("enc.p3", bytes: group * cells[3] * channels * 9 * 4)
         let act3 = try scratch("enc.a3", bytes: group * cells[3] * channels * 4)
-        let flattened = try scratch("enc.flat", bytes: group * perChunk * flat * 4)
+        let flattened = try scratch("enc.flat", bytes: chunks * perChunk * flat * 4)
 
         let conv = "model.audio_tower."
         let w1 = try weight(conv + "conv2d1.weight"), b1 = try weight(conv + "conv2d1.bias")
@@ -86,16 +92,16 @@ extension MetalEngine {
             let first = start
             try await run { pass in
                 pass.patches(x: Span(input), y: Span(patch1), chunks: n, height: heights[0], width: widths[0], channels: 1)
-                pass.gemm(weight: w1, bias: b1, rows: channels, cols: 9, x: Span(patch1), y: Span(act1), count: n * cells[1])
+                try pass.gemm(weight: w1, bias: b1, rows: channels, cols: 9, x: Span(patch1), y: Span(act1), count: n * cells[1], matrix: true)
                 pass.gelu(Span(act1), count: n * cells[1] * channels)
                 pass.patches(x: Span(act1), y: Span(patch2), chunks: n, height: heights[1], width: widths[1], channels: channels)
-                pass.gemm(weight: w2, bias: b2, rows: channels, cols: channels * 9, x: Span(patch2), y: Span(act2), count: n * cells[2])
+                try pass.gemm(weight: w2, bias: b2, rows: channels, cols: channels * 9, x: Span(patch2), y: Span(act2), count: n * cells[2], matrix: true)
                 pass.gelu(Span(act2), count: n * cells[2] * channels)
                 pass.patches(x: Span(act2), y: Span(patch3), chunks: n, height: heights[2], width: widths[2], channels: channels)
-                pass.gemm(weight: w3, bias: b3, rows: channels, cols: channels * 9, x: Span(patch3), y: Span(act3), count: n * cells[3])
+                try pass.gemm(weight: w3, bias: b3, rows: channels, cols: channels * 9, x: Span(patch3), y: Span(act3), count: n * cells[3], matrix: true)
                 pass.gelu(Span(act3), count: n * cells[3] * channels)
-                pass.flattenFrequency(x: Span(act3), y: Span(flattened), chunks: n, height: heights[3], width: widths[3], channels: channels)
-                pass.gemm(weight: wOut, rows: width, cols: flat, x: Span(flattened), y: Span(x, first * perChunk * width * 4), count: n * perChunk)
+                pass.flattenFrequency(x: Span(act3), y: Span(flattened, first * perChunk * flat * 4), chunks: n,
+                                      height: heights[3], width: widths[3], channels: channels)
             }
             start += n
         }
@@ -128,6 +134,10 @@ extension MetalEngine {
         var bodies: [(Pass) throws -> Void] = []
         let positions = encoderPositions
         bodies.append { pass in
+            // one product over every chunk: with a per-group product the last group's row count,
+            // and so its bits, would depend on the group size (apple's kernel takes another path
+            // below 75 rows at this width)
+            try pass.gemm(weight: wOut, rows: width, cols: flat, x: Span(flattened), y: Span(x), count: chunks * perChunk, matrix: true)
             pass.addPositions(x: Span(x), positions: Span(positions), dim: width, count: tokens, period: perChunk)
         }
         for layer in 0..<shape.encoderLayers {
@@ -143,18 +153,18 @@ extension MetalEngine {
             let innerWidth = shape.encoderInner
             bodies.append { pass in
                 pass.layerNorm(x: Span(x), y: Span(h), gain: ln1.0, bias: ln1.1, dim: width, count: tokens)
-                pass.gemm(weight: wq.0, bias: wq.1, rows: width, cols: width, x: Span(h), y: Span(q), count: tokens)
-                pass.gemm(weight: wk.0, bias: wk.1, rows: width, cols: width, x: Span(h), y: Span(k), count: tokens)
-                pass.gemm(weight: wv.0, bias: wv.1, rows: width, cols: width, x: Span(h), y: Span(v), count: tokens)
-                pass.attention(q: Span(q), keys: Span(k), values: Span(v), contexts: Span(contexts), list: Span(contexts),
+                try pass.gemm(weight: wq.0, bias: wq.1, rows: width, cols: width, x: Span(h), y: Span(q), count: tokens, matrix: true)
+                try pass.gemm(weight: wk.0, bias: wk.1, rows: width, cols: width, x: Span(h), y: Span(k), count: tokens, matrix: true)
+                try pass.gemm(weight: wv.0, bias: wv.1, rows: width, cols: width, x: Span(h), y: Span(v), count: tokens, matrix: true)
+                try pass.attention(q: Span(q), keys: Span(k), values: Span(v), contexts: Span(contexts), list: Span(contexts),
                                scores: Span(scores), y: Span(mixed), heads: heads, keyHeads: heads, headDim: headDim,
                                rows: tokens, maxContext: stride)
-                pass.gemm(weight: wo.0, bias: wo.1, rows: width, cols: width, x: Span(mixed), y: Span(o), count: tokens)
+                try pass.gemm(weight: wo.0, bias: wo.1, rows: width, cols: width, x: Span(mixed), y: Span(o), count: tokens, matrix: true)
                 pass.add(Span(x), Span(o), into: Span(x), count: tokens * width)
                 pass.layerNorm(x: Span(x), y: Span(h), gain: ln2.0, bias: ln2.1, dim: width, count: tokens)
-                pass.gemm(weight: fc1.0, bias: fc1.1, rows: innerWidth, cols: width, x: Span(h), y: Span(inner), count: tokens)
+                try pass.gemm(weight: fc1.0, bias: fc1.1, rows: innerWidth, cols: width, x: Span(h), y: Span(inner), count: tokens, matrix: true)
                 pass.gelu(Span(inner), count: tokens * innerWidth)
-                pass.gemm(weight: fc2.0, bias: fc2.1, rows: width, cols: innerWidth, x: Span(inner), y: Span(o), count: tokens)
+                try pass.gemm(weight: fc2.0, bias: fc2.1, rows: width, cols: innerWidth, x: Span(inner), y: Span(o), count: tokens, matrix: true)
                 pass.add(Span(x), Span(o), into: Span(x), count: tokens * width)
             }
         }
@@ -164,9 +174,9 @@ extension MetalEngine {
         let audioWidth = shape.audioWidth
         bodies.append { pass in
             pass.layerNorm(x: Span(x), y: Span(h), gain: post.0, bias: post.1, dim: width, count: tokens)
-            pass.gemm(weight: p1.0, bias: p1.1, rows: width, cols: width, x: Span(h), y: Span(o), count: tokens)
+            try pass.gemm(weight: p1.0, bias: p1.1, rows: width, cols: width, x: Span(h), y: Span(o), count: tokens, matrix: true)
             pass.gelu(Span(o), count: tokens * width)
-            pass.gemm(weight: p2.0, bias: p2.1, rows: audioWidth, cols: width, x: Span(o), y: Span(output), count: tokens)
+            try pass.gemm(weight: p2.0, bias: p2.1, rows: audioWidth, cols: width, x: Span(o), y: Span(output), count: tokens, matrix: true)
         }
         try await runAll(bodies)
         return AudioEmbedding(buffer: output, count: tokens, width: audioWidth)

@@ -90,9 +90,20 @@ extension MetalEngine {
         )
     }
 
+    /// a run of rows that attend among themselves: one piece of a prefill, or a whole step batch
+    private struct Segment {
+        var rowStart: Int
+        var rows: Int
+        var maxContext: Int
+        /// the cache slot of the run's first row when its attention runs as square matrix products
+        var squareSlot: Int?
+    }
+
     /// the 28 layers over `rows` rows whose embeddings are already in the `x` work buffer.
     /// each row writes its key and value to its own slot and attends over its own context.
-    private func layerBodies(prefix: String, rows: Int, maxContext: Int, squareFrom firstSlot: Int? = nil) throws -> [(Pass) throws -> Void] {
+    /// matrix products run over all rows at once, attention once per segment.
+    /// - parameter matrix: a per-piece pass (prefill) that may use apple's matrix kernel; never a step
+    private func layerBodies(prefix: String, rows: Int, segments: [Segment], matrix: Bool) throws -> [(Pass) throws -> Void] {
         let width = shape.width
         let keyWidth = shape.keyWidth
         let inner = shape.inner
@@ -110,7 +121,8 @@ extension MetalEngine {
         let o = try scratch(prefix + "o", bytes: rows * width * 4)
         let gate = try scratch(prefix + "gate", bytes: rows * inner * 4)
         let up = try scratch(prefix + "up", bytes: rows * inner * 4)
-        let scores = try scratch(prefix + "scores", bytes: rows * heads * maxContext * 4)
+        // segments run one after another, so they take turns with one scores buffer
+        let scores = try scratch(prefix + "scores", bytes: segments.map { $0.rows * heads * $0.maxContext * 4 }.max() ?? 16)
         let positions = try scratch(prefix + "pos", bytes: rows * 4)
         let targets = try scratch(prefix + "slot", bytes: rows * 4)
         let identity = try scratch(prefix + "row", bytes: rows * 4)
@@ -126,31 +138,34 @@ extension MetalEngine {
             let keySpan = Span(keys, layer * layerBytes)
             let valueSpan = Span(values, layer * layerBytes)
             bodies.append { pass in
-                pass.rmsNorm(x: Span(x), y: Span(h), gain: w.norm1, dim: width, count: rows, eps: eps)
-                pass.gemm(weight: w.q, rows: width, cols: width, x: Span(h), y: Span(qRaw), count: rows)
-                pass.gemm(weight: w.k, rows: keyWidth, cols: width, x: Span(h), y: Span(kRaw), count: rows)
-                pass.gemm(weight: w.v, rows: keyWidth, cols: width, x: Span(h), y: Span(vRaw), count: rows)
+                try pass.rmsNorm(x: Span(x), y: Span(h), gain: w.norm1, dim: width, count: rows, eps: eps)
+                try pass.gemm(weight: w.q, rows: width, cols: width, x: Span(h), y: Span(qRaw), count: rows, matrix: matrix)
+                try pass.gemm(weight: w.k, rows: keyWidth, cols: width, x: Span(h), y: Span(kRaw), count: rows, matrix: matrix)
+                try pass.gemm(weight: w.v, rows: keyWidth, cols: width, x: Span(h), y: Span(vRaw), count: rows, matrix: matrix)
                 pass.headNormRope(x: Span(qRaw), y: Span(q), gain: w.qNorm, positions: Span(positions), targets: Span(identity),
                                   heads: heads, headDim: headDim, count: rows, eps: eps)
                 pass.headNormRope(x: Span(kRaw), y: keySpan, gain: w.kNorm, positions: Span(positions), targets: Span(targets),
                                   heads: keyHeads, headDim: headDim, count: rows, eps: eps)
                 pass.scatterRows(x: Span(vRaw), y: valueSpan, targets: Span(targets), dim: keyWidth, count: rows)
-                if let firstSlot {
-                    pass.attentionSquare(q: Span(q), keys: keySpan, values: valueSpan, contexts: Span(contexts),
-                                         scores: Span(scores), y: Span(mixed), heads: heads, keyHeads: keyHeads, headDim: headDim,
-                                         rows: rows, maxContext: maxContext, firstSlot: firstSlot)
-                } else {
-                    pass.attention(q: Span(q), keys: keySpan, values: valueSpan, contexts: Span(contexts), list: Span(list),
-                                   scores: Span(scores), y: Span(mixed), heads: heads, keyHeads: keyHeads, headDim: headDim,
-                                   rows: rows, maxContext: maxContext)
+                for segment in segments {
+                    let rowBytes = segment.rowStart * width * 4
+                    if let firstSlot = segment.squareSlot {
+                        try pass.attentionSquare(q: Span(q, rowBytes), keys: keySpan, values: valueSpan, contexts: Span(contexts, segment.rowStart * 16),
+                                                 scores: Span(scores), y: Span(mixed, rowBytes), heads: heads, keyHeads: keyHeads, headDim: headDim,
+                                                 rows: segment.rows, maxContext: segment.maxContext, firstSlot: firstSlot)
+                    } else {
+                        try pass.attention(q: Span(q, rowBytes), keys: keySpan, values: valueSpan, contexts: Span(contexts, segment.rowStart * 16),
+                                           list: Span(list), scores: Span(scores), y: Span(mixed, rowBytes), heads: heads, keyHeads: keyHeads,
+                                           headDim: headDim, rows: segment.rows, maxContext: segment.maxContext)
+                    }
                 }
-                pass.gemm(weight: w.o, rows: width, cols: width, x: Span(mixed), y: Span(o), count: rows)
+                try pass.gemm(weight: w.o, rows: width, cols: width, x: Span(mixed), y: Span(o), count: rows, matrix: matrix)
                 pass.add(Span(x), Span(o), into: Span(x), count: rows * width)
-                pass.rmsNorm(x: Span(x), y: Span(h), gain: w.norm2, dim: width, count: rows, eps: eps)
-                pass.gemm(weight: w.gate, rows: inner, cols: width, x: Span(h), y: Span(gate), count: rows)
-                pass.gemm(weight: w.up, rows: inner, cols: width, x: Span(h), y: Span(up), count: rows)
+                try pass.rmsNorm(x: Span(x), y: Span(h), gain: w.norm2, dim: width, count: rows, eps: eps)
+                try pass.gemm(weight: w.gate, rows: inner, cols: width, x: Span(h), y: Span(gate), count: rows, matrix: matrix)
+                try pass.gemm(weight: w.up, rows: inner, cols: width, x: Span(h), y: Span(up), count: rows, matrix: matrix)
                 pass.siluMul(gate: Span(gate), up: Span(up), into: Span(gate), count: rows * inner)
-                pass.gemm(weight: w.down, rows: width, cols: inner, x: Span(gate), y: Span(o), count: rows)
+                try pass.gemm(weight: w.down, rows: width, cols: inner, x: Span(gate), y: Span(o), count: rows, matrix: matrix)
                 pass.add(Span(x), Span(o), into: Span(x), count: rows * width)
             }
         }
@@ -168,8 +183,8 @@ extension MetalEngine {
         let norm = try weight("model.language_model.norm.weight")
         let table = try weight("model.language_model.embed_tokens.weight")
         return { pass in
-            pass.rmsNorm(x: Span(x, firstRow * width * 4), y: Span(h), gain: norm, dim: width, count: count, eps: eps)
-            pass.gemm(weight: table, rows: vocabulary, cols: width, x: Span(h), y: Span(logits), count: count)
+            try pass.rmsNorm(x: Span(x, firstRow * width * 4), y: Span(h), gain: norm, dim: width, count: count, eps: eps)
+            try pass.gemm(weight: table, rows: vocabulary, cols: width, x: Span(h), y: Span(logits), count: count)
         }
     }
 
@@ -177,57 +192,147 @@ extension MetalEngine {
     /// - returns: the piece, and the next-token logits after the prompt (one row of `vocabulary` floats,
     ///   valid until the next prefill)
     func prefill(prompt: [Int32], audio: AudioEmbedding, beams: Int, maxNewTokens: Int) async throws -> (DecoderPiece, LogitRows) {
-        let rows = prompt.count
-        guard rows + maxNewTokens <= maxPositions else {
-            throw EngineFailure.tooLong("a piece of \(rows) prompt tokens is too long for one pass")
-        }
-        guard let audioStart = prompt.firstIndex(of: shape.audioTokenID),
-              prompt[audioStart..<min(prompt.count, audioStart + audio.count)].allSatisfy({ $0 == shape.audioTokenID }),
-              prompt.filter({ $0 == shape.audioTokenID }).count == audio.count
-        else { throw EngineFailure.badConfig("the prompt's audio placeholders do not match the audio tokens") }
+        try await prefillTogether([PrefillRequest(prompt: prompt, audio: audio, beams: beams, maxNewTokens: maxNewTokens)])[0]
+    }
 
-        let piece = DecoderPiece(
-            slots: try takeSlots(slotsNeeded(promptLength: rows, beams: beams, maxNewTokens: maxNewTokens)),
-            promptLength: rows, beams: beams
-        )
-        let prefix = "pre."
-        let width = shape.width
+    /// one piece for `prefill(pieces:)`
+    struct PrefillRequest {
+        var prompt: [Int32]
+        var audio: AudioEmbedding
+        var beams: Int
+        var maxNewTokens: Int
+    }
+
+    /// whether a piece of this many prompt rows can share a prefill pass with others and keep the
+    /// bits it gets alone: its matrix products must already run on apple's kernel by themselves
+    /// (`wideRows`) and past the row count where that kernel changes paths for every inner width
+    /// the decoder has (30 rows at 6,144, measured; 10 at 2,048).
+    func canShareFill(rows: Int) -> Bool { rows >= max(wideRows, 30) }
+
+    /// reads several pieces in one pass: every matrix product runs once over all their rows, so each
+    /// matrix is widened once, while attention stays within each piece. every piece's cache rows and
+    /// logits are bit-identical to reading it alone, because a piece is only stacked with others when
+    /// `canShareFill` holds for it; a piece that is too short is read alone first.
+    /// - returns: per piece, in order, the piece and its next-token logits (valid until the next prefill)
+    func prefill(pieces requests: [PrefillRequest]) async throws -> [(DecoderPiece, LogitRows)] {
+        var results: [(DecoderPiece, LogitRows)?] = Array(repeating: nil, count: requests.count)
+        var shared: [Int] = []
+        var finished: [DecoderPiece] = []
+        let vocabulary = shape.vocabulary
         do {
-            // from a few dozen rows up, the square products go to apple's matrix kernel
-            let square = rows >= squareRows ? piece.slots.lowerBound : nil
-            var bodies = try layerBodies(prefix: prefix, rows: rows, maxContext: (rows + 63) / 64 * 64, squareFrom: square)
-            let x = try scratch(prefix + "x", bytes: 16)
-            let tokens = try scratch(prefix + "tok", bytes: rows * 4)
-            let audioRows = try scratch(prefix + "arow", bytes: audio.count * 4)
-            fill(tokens, prompt)
-            fill(audioRows, (0..<audio.count).map { Int32(audioStart + $0) })
-            fill(try scratch(prefix + "pos", bytes: 16), (0..<rows).map { Int32($0) })
-            fill(try scratch(prefix + "row", bytes: 16), (0..<rows).map { Int32($0) })
-            fill(try scratch(prefix + "slot", bytes: 16), (0..<rows).map { Int32(piece.slots.lowerBound + $0) })
-            let contexts = try scratch(prefix + "ctx", bytes: 16).contents().bindMemory(to: UInt32.self, capacity: rows * 4)
-            for row in 0..<rows {
-                // causal: row t sees slots 0...t of this piece
-                contexts[row * 4] = UInt32(piece.slots.lowerBound)
-                contexts[row * 4 + 1] = UInt32(row + 1)
-                contexts[row * 4 + 2] = 0
-                contexts[row * 4 + 3] = 0
+            // logits of a lone pass live in the buffer the next pass reuses, so they are copied out
+            let lone = try scratch("pre.lone.logits", bytes: requests.count * vocabulary * 4)
+                .contents().bindMemory(to: Float.self, capacity: requests.count * vocabulary)
+            for (index, request) in requests.enumerated() {
+                if requests.count > 1, canShareFill(rows: request.prompt.count) { shared.append(index); continue }
+                let (piece, logits) = try await prefillTogether([request])[0]
+                finished.append(piece)
+                let copy = lone + index * vocabulary
+                copy.update(from: logits.values.baseAddress!, count: vocabulary)
+                results[index] = (piece, LogitRows(values: UnsafeBufferPointer(start: copy, count: vocabulary)))
             }
-            let table = try weight("model.language_model.embed_tokens.weight")
-            let audioCount = audio.count
-            let audioBuffer = audio.buffer
-            bodies.insert({ pass in
-                pass.embed(table: table, y: Span(x), tokens: Span(tokens), dim: width, count: rows)
-                pass.scatterRows(x: Span(audioBuffer), y: Span(x), targets: Span(audioRows), dim: width, count: audioCount)
-            }, at: 0)
-            bodies.append(try headBody(prefix: prefix, firstRow: rows - 1, count: 1))
-            try await runAll(bodies)
+            if !shared.isEmpty {
+                let together = try await prefillTogether(shared.map { requests[$0] })
+                for (position, index) in shared.enumerated() { results[index] = together[position] }
+            }
         } catch {
-            release(piece)
+            for piece in finished { release(piece) }
             throw error
         }
-        let logits = try scratch(prefix + "logits", bytes: 16)
-        let pointer = logits.contents().bindMemory(to: Float.self, capacity: shape.vocabulary)
-        return (piece, LogitRows(values: UnsafeBufferPointer(start: pointer, count: shape.vocabulary)))
+        return results.map { $0! }
+    }
+
+    private func prefillTogether(_ requests: [PrefillRequest]) async throws -> [(DecoderPiece, LogitRows)] {
+        var audioStarts: [Int] = []
+        for request in requests {
+            let prompt = request.prompt, audio = request.audio
+            guard prompt.count + request.maxNewTokens <= maxPositions else {
+                throw EngineFailure.tooLong("a piece of \(prompt.count) prompt tokens is too long for one pass")
+            }
+            guard let audioStart = prompt.firstIndex(of: shape.audioTokenID),
+                  prompt[audioStart..<min(prompt.count, audioStart + audio.count)].allSatisfy({ $0 == shape.audioTokenID }),
+                  prompt.filter({ $0 == shape.audioTokenID }).count == audio.count
+            else { throw EngineFailure.badConfig("the prompt's audio placeholders do not match the audio tokens") }
+            audioStarts.append(audioStart)
+        }
+
+        var pieces: [DecoderPiece] = []
+        let prefix = "pre."
+        let width = shape.width
+        let vocabulary = shape.vocabulary
+        do {
+            var segments: [Segment] = []
+            var rowStart = 0
+            for request in requests {
+                let rows = request.prompt.count
+                let piece = DecoderPiece(
+                    slots: try takeSlots(slotsNeeded(promptLength: rows, beams: request.beams, maxNewTokens: request.maxNewTokens)),
+                    promptLength: rows, beams: request.beams
+                )
+                pieces.append(piece)
+                // from a few dozen rows up, the square products go to apple's matrix kernel
+                segments.append(Segment(rowStart: rowStart, rows: rows, maxContext: (rows + 63) / 64 * 64,
+                                        squareSlot: rows >= squareRows ? piece.slots.lowerBound : nil))
+                rowStart += rows
+            }
+            let rows = rowStart
+            var bodies = try layerBodies(prefix: prefix, rows: rows, segments: segments, matrix: true)
+            let x = try scratch(prefix + "x", bytes: 16)
+            let tokens = try scratch(prefix + "tok", bytes: rows * 4)
+            let audioRows = try scratch(prefix + "arow", bytes: requests.reduce(0) { $0 + $1.audio.count } * 4)
+            let h = try scratch(prefix + "h", bytes: 16)
+            let logits = try scratch(prefix + "logits", bytes: requests.count * vocabulary * 4)
+            var positions: [Int32] = [], slots: [Int32] = [], promptTokens: [Int32] = [], audioTargets: [Int32] = []
+            let contexts = try scratch(prefix + "ctx", bytes: 16).contents().bindMemory(to: UInt32.self, capacity: rows * 4)
+            for (index, segment) in segments.enumerated() {
+                let piece = pieces[index]
+                promptTokens += requests[index].prompt
+                positions += (0..<segment.rows).map { Int32($0) }
+                slots += (0..<segment.rows).map { Int32(piece.slots.lowerBound + $0) }
+                audioTargets += (0..<requests[index].audio.count).map { Int32(segment.rowStart + audioStarts[index] + $0) }
+                for row in 0..<segment.rows {
+                    // causal: row t sees slots 0...t of this piece
+                    let at = (segment.rowStart + row) * 4
+                    contexts[at] = UInt32(piece.slots.lowerBound)
+                    contexts[at + 1] = UInt32(row + 1)
+                    contexts[at + 2] = 0
+                    contexts[at + 3] = 0
+                }
+            }
+            fill(tokens, promptTokens)
+            fill(audioRows, audioTargets)
+            fill(try scratch(prefix + "pos", bytes: 16), positions)
+            fill(try scratch(prefix + "row", bytes: 16), (0..<rows).map { Int32($0) })
+            fill(try scratch(prefix + "slot", bytes: 16), slots)
+            let table = try weight("model.language_model.embed_tokens.weight")
+            let norm = try weight("model.language_model.norm.weight")
+            let audios = requests.map { (buffer: $0.audio.buffer, count: $0.audio.count) }
+            let eps = shape.normEps
+            bodies.insert({ pass in
+                pass.embed(table: table, y: Span(x), tokens: Span(tokens), dim: width, count: rows)
+                var done = 0
+                for audio in audios {
+                    pass.scatterRows(x: Span(audio.buffer), y: Span(x), targets: Span(audioRows, done * 4), dim: width, count: audio.count)
+                    done += audio.count
+                }
+            }, at: 0)
+            // the output head on each piece's last row, one row at a time as when read alone
+            bodies.append { pass in
+                for (index, segment) in segments.enumerated() {
+                    let last = segment.rowStart + segment.rows - 1
+                    try pass.rmsNorm(x: Span(x, last * width * 4), y: Span(h), gain: norm, dim: width, count: 1, eps: eps)
+                    try pass.gemm(weight: table, rows: vocabulary, cols: width, x: Span(h), y: Span(logits, index * vocabulary * 4), count: 1)
+                }
+            }
+            try await runAll(bodies)
+            let pointer = logits.contents().bindMemory(to: Float.self, capacity: requests.count * vocabulary)
+            return pieces.enumerated().map { index, piece in
+                (piece, LogitRows(values: UnsafeBufferPointer(start: pointer + index * vocabulary, count: vocabulary)))
+            }
+        } catch {
+            for piece in pieces { release(piece) }
+            throw error
+        }
     }
 
     /// one decoder step for every running beam of every active piece, as one wide batch.
@@ -250,7 +355,7 @@ extension MetalEngine {
         maxContext = (maxContext + 255) / 256 * 256
         // sized before the layers are built, since they hold on to the buffer they are given
         let listBuffer = try scratch(prefix + "list", bytes: rows * maxList * 4)
-        var bodies = try layerBodies(prefix: prefix, rows: rows, maxContext: maxContext)
+        var bodies = try layerBodies(prefix: prefix, rows: rows, segments: [Segment(rowStart: 0, rows: rows, maxContext: maxContext, squareSlot: nil)], matrix: false)
 
         let width = shape.width
         let x = try scratch(prefix + "x", bytes: 16)

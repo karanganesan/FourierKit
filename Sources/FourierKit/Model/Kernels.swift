@@ -2,8 +2,21 @@
 ///
 /// weights stay as the checkpoint's raw bf16 bits and are widened to 32-bit inside each kernel,
 /// which is exact, so the math and every cache are 32-bit while weight reads cost 16 bits.
-/// every output value is computed by one thread in a fixed order that does not depend on how many
-/// rows share the call, so a row's result is bit-identical at any batch width.
+///
+/// what holds where:
+/// - these kernels: every output value is computed in a fixed order that depends only on the
+///   row's own data and context, never on how many rows share the call or where the row sits.
+///   most values come from one thread; the reductions split into runs of 64 (rms norm, softmax,
+///   the value mix) add their partial sums in a fixed order too. a decoder step uses only these,
+///   so a row's logits are bit-identical at any batch width.
+/// - apple's matrix kernel (`MPSMatrixMultiplication`, used by the prefill and the encoder for
+///   matrix products of `wideRows` rows or more, and for square prefill attention): its order is
+///   apple's and not documented. measured on an m4 against a 6,400-row run, a row's bits do not
+///   depend on the row count or the row's position once the count is past a boundary that grows
+///   with the inner width: 10 rows at 1,024 and 2,048, 30 at 6,144, 40 at 4,096, 90 at 4,320 and
+///   75 at 7,680. below it apple's kernel takes another path with other rounding. so those passes
+///   are a pure function of the piece, and two pieces read in one product stay bit-identical to
+///   being read alone only when each is past the boundary by itself.
 enum Kernels {
     static let source = """
     #include <metal_stdlib>
