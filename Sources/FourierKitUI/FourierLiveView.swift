@@ -108,6 +108,7 @@ public struct FourierLiveView<Accessory: View>: View {
             .defaultScrollAnchor(.top, for: .alignment)
             .defaultScrollAnchor(.bottom, for: .sizeChanges)
             .scrollIndicators(.automatic)
+            .scrollEdgeEffectStyle(.soft, for: .top)
         }
     }
 

@@ -20,6 +20,8 @@ struct FourierPlaygroundApp: App {
                 .task { await app.launch() }
         }
         .defaultSize(width: 1120, height: 720)
+        // always open with the window, even if it was closed when the app last quit
+        .defaultLaunchBehavior(.presented)
         .windowResizability(.contentMinSize)
         .commands {
             PlaygroundCommands(app: app)

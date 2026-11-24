@@ -39,7 +39,7 @@ public struct FourierPermissionView<Granted: View>: View {
                 case .notDetermined:
                     message(symbol: "mic", title: "allow the microphone", detail: reason) {
                         Button("allow microphone") { Task { await model.requestMicrophone() } }
-                            .buttonStyle(.glassProminent)
+                            .fourierGlassButton(prominent: true)
                             .fourierTextStyle(.body)
                             .controlSize(.large)
                     }
@@ -49,7 +49,7 @@ public struct FourierPermissionView<Granted: View>: View {
                         title: "microphone is off",
                         detail: "turn it on in system settings > privacy & security > microphone, then come back.") {
                             Button("open system settings") { model.openMicrophoneSettings() }
-                                .buttonStyle(.glass)
+                                .fourierGlassButton()
                                 .fourierTextStyle(.body)
                                 .controlSize(.large)
                         }

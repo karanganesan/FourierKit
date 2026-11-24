@@ -68,6 +68,8 @@ public struct FourierStatsView<Footer: View>: View {
             .padding(16)
         }
         .scrollIndicators(.automatic)
+        // rows fade as they pass under a toolbar, so they never collide with its buttons
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .task { await model.observeMetrics() }
     }
 

@@ -39,8 +39,7 @@ struct ContentView: View {
             PlaygroundToolbar()
         }
         // one glass surface for the whole window, in light and dark, with no fills on top of it
-        .containerBackground(.regularMaterial, for: .window)
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .fourierGlassWindow()
         .navigationTitle(navigationTitle)
         .task { await app.state.observe() }
         .onChange(of: app.state.isReady, initial: true) { _, ready in
@@ -137,6 +136,7 @@ private struct Sidebar: View {
         .listStyle(.sidebar)
         .tint(Color.primary.opacity(0.16))
         .scrollContentBackground(.hidden)
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .focused($focused)
         .onDeleteCommand {
             if case .recent(let id) = app.selection { delete(id) }

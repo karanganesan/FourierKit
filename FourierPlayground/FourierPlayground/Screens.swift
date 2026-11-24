@@ -31,6 +31,7 @@ struct TranscriptText: View {
             .frame(maxWidth: 880, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .copyable([text])
     }
 
@@ -67,7 +68,7 @@ struct TranscribeScreen: View {
         .overlay {
             if dropTargeted {
                 Color.clear
-                    .glassEffect(.regular, in: .rect(cornerRadius: 24, style: .continuous))
+                    .fourierGlass()
                     .padding(16)
                     .allowsHitTesting(false)
                     .transition(.opacity)
@@ -97,7 +98,7 @@ struct TranscribeScreen: View {
                 .foregroundStyle(app.transcribe.error == nil ? Color.primary.opacity(0.64) : Color.red)
         } actions: {
             Button("choose file…") { app.transcribe.choosing = true }
-                .buttonStyle(.glassProminent)
+                .fourierGlassButton(prominent: true)
                 .controlSize(.large)
                 .fourierTextStyle(.body)
                 .keyboardShortcut(.defaultAction)
@@ -123,7 +124,7 @@ struct TranscribeScreen: View {
             .fourierTextStyle(.caption, numbers: .tabular)
             .fourierInk(.secondary)
             Button("cancel") { app.transcribe.cancel() }
-                .buttonStyle(.glass)
+                .fourierGlassButton()
                 .fourierTextStyle(.body)
                 .keyboardShortcut(.cancelAction)
         }
@@ -278,7 +279,7 @@ struct RecentScreen: View {
                 Text("undo brings it back.").fourierTextStyle(.body)
             } actions: {
                 Button("listen") { app.selection = .mode(.listen) }
-                    .buttonStyle(.glass)
+                    .fourierGlassButton()
                     .fourierTextStyle(.body)
             }
         }

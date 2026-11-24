@@ -62,7 +62,7 @@ public struct FourierPrepareView<Accessory: View>: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("try again") { Task { await model.prepare() } }
-                    .buttonStyle(.glass)
+                    .fourierGlassButton()
                     .fourierTextStyle(.body)
             } else {
                 // fixed slots: the stage on the left, bytes and time on the right, one line each

@@ -42,7 +42,7 @@ private struct SettingsForm<Content: View>: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
-        .containerBackground(.regularMaterial, for: .window)
+        .fourierGlassWindow()
     }
 }
 

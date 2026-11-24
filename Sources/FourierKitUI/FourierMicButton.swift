@@ -60,7 +60,7 @@ public struct FourierMicButton<Label: View>: View {
                 button.buttonStyle(.borderless)
             } else {
                 // system glass, untinted: light in light mode, dark in dark mode
-                button.buttonStyle(.glass).buttonBorderShape(.circle)
+                button.fourierGlassButton().buttonBorderShape(.circle)
             }
         }
         .foregroundStyle(.primary)
