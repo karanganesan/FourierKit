@@ -40,7 +40,7 @@ public struct FourierPermissionView<Granted: View>: View {
                     message(symbol: "mic", title: "allow the microphone", detail: reason) {
                         Button("allow microphone") { Task { await model.requestMicrophone() } }
                             .buttonStyle(.glassProminent)
-                            .fourierTextStyle(.body.weight(500))
+                            .fourierTextStyle(.body)
                             .controlSize(.large)
                     }
                 case .denied:
@@ -50,7 +50,7 @@ public struct FourierPermissionView<Granted: View>: View {
                         detail: "turn it on in system settings > privacy & security > microphone, then come back.") {
                             Button("open system settings") { model.openMicrophoneSettings() }
                                 .buttonStyle(.glass)
-                                .fourierTextStyle(.body.weight(500))
+                                .fourierTextStyle(.body)
                                 .controlSize(.large)
                         }
                 case .restricted:
@@ -87,6 +87,7 @@ public struct FourierPermissionView<Granted: View>: View {
             action()
         }
         .frame(maxWidth: 400)
+        .fourierGlassPanel()
         .accessibilityElement(children: .contain)
     }
 }

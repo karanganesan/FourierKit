@@ -64,7 +64,7 @@ struct PlaygroundCommands: Commands {
 
         // view
         CommandGroup(replacing: .sidebar) {
-            Button("toggle sidebar") { Self.send("toggleSidebar:") }
+            Button(app.showSidebar ? "hide sidebar" : "show sidebar") { app.showSidebar.toggle() }
                 .keyboardShortcut("s", modifiers: [.command, .control])
             Button(app.showStats ? "hide live stats" : "show live stats") { app.showStats.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .control])

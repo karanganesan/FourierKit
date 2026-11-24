@@ -26,6 +26,7 @@ public struct FourierMicButton<Label: View>: View {
     private let diameter: CGFloat
     private let action: () -> Void
     private let label: (FourierMicStatus) -> Label
+    private var isPlain = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -46,19 +47,34 @@ public struct FourierMicButton<Label: View>: View {
         self.label = label
     }
 
+    /// the button without glass of its own, for use inside a glass bar such as `FourierControlBar`
+    public func plain() -> FourierMicButton {
+        var copy = self
+        copy.isPlain = true
+        return copy
+    }
+
     public var body: some View {
+        Group {
+            if isPlain {
+                button.buttonStyle(.borderless)
+            } else {
+                // system glass, untinted: light in light mode, dark in dark mode
+                button.buttonStyle(.glass).buttonBorderShape(.circle)
+            }
+        }
+        .foregroundStyle(.primary)
+        .disabled(status == .finishing)
+        .accessibilityLabel(accessibilityLabel)
+        .animation(reduceMotion ? nil : .smooth, value: status)
+    }
+
+    private var button: some View {
         Button(action: action) {
             label(status)
                 .frame(width: diameter, height: diameter)
                 .contentShape(.circle)
         }
-        .buttonStyle(.glassProminent)
-        .buttonBorderShape(.circle)
-        .tint(.white)
-        .foregroundStyle(.black)
-        .disabled(status == .finishing)
-        .accessibilityLabel(accessibilityLabel)
-        .animation(reduceMotion ? nil : .smooth, value: status)
     }
 
     private var accessibilityLabel: String {

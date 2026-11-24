@@ -78,7 +78,7 @@ public struct FourierStatsView<Footer: View>: View {
                     .fourierTextStyle(.largeTitle, numbers: .tabular)
                     .fourierInk(.primary)
                 Text("realtime")
-                    .fourierTextStyle(.footnote)
+                    .fourierTextStyle(.caption)
                     .fourierInk(.tertiary)
             }
             .accessibilityElement(children: .combine)
@@ -168,7 +168,7 @@ struct StatsRow: View {
                 .lineLimit(1)
                 .multilineTextAlignment(.trailing)
         }
-        .fourierTextStyle(.footnote, numbers: .tabular)
+        .fourierTextStyle(.body, numbers: .tabular)
         .frame(minHeight: 24)
         .accessibilityElement(children: .combine)
     }
@@ -199,7 +199,7 @@ struct StatsBar: View {
                 .fourierInk(.primary)
                 .frame(width: 40, alignment: .trailing)
         }
-        .fourierTextStyle(.footnote, numbers: .tabular)
+        .fourierTextStyle(.body, numbers: .tabular)
         .frame(minHeight: 24)
         .accessibilityElement(children: .combine)
     }

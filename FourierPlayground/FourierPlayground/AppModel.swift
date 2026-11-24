@@ -65,6 +65,7 @@ final class AppModel {
     private(set) var hasBeenReady = false
     var selection: SidebarItem = .mode(.listen)
     var showStats = false
+    var showSidebar = true
     /// bumped to ask settings to open on a tab
     var settingsTab = "compute"
 

@@ -67,7 +67,7 @@ public struct FourierLiveText: View {
         VStack(alignment: .leading, spacing: style.lineHeight / 2) {
             if paragraphs.isEmpty {
                 Text(placeholder.isEmpty ? " " : placeholder.lowercased())
-                    .fourierInk(.quaternary)
+                    .fourierInk(.tertiary)
             } else {
                 ForEach(paragraphs) { paragraph in
                     LiveParagraph(paragraph: paragraph).equatable()
@@ -90,7 +90,6 @@ public struct FourierLiveText: View {
 /// one phrase. equatable, so a closed phrase is never re-rendered while the open one changes.
 private struct LiveParagraph: View, Equatable {
     let paragraph: FourierLiveText.Paragraph
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.paragraph == rhs.paragraph }
@@ -103,9 +102,9 @@ private struct LiveParagraph: View, Equatable {
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            // a crossfade, not a glyph morph: two draws per change instead of one per frame
-            .contentTransition(.opacity)
-            .animation(reduceMotion ? nil : .smooth(duration: 0.16), value: paragraph)
+            // text changes land at once. a crossfade here made the whole phrase flash on every
+            // update, and settled words must look like they never moved.
+            .transaction { $0.animation = nil }
     }
 
     private static func trimmedStart(_ text: String) -> String {

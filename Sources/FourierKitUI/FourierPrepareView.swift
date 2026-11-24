@@ -58,12 +58,12 @@ public struct FourierPrepareView<Accessory: View>: View {
 
             if let error = model.prepareError {
                 Text(FourierFormat.error(error))
-                    .fourierTextStyle(.footnote)
+                    .fourierTextStyle(.caption)
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("try again") { Task { await model.prepare() } }
                     .buttonStyle(.glass)
-                    .fourierTextStyle(.body.weight(500))
+                    .fourierTextStyle(.body)
             } else {
                 // fixed slots: the stage on the left, bytes and time on the right, one line each
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
@@ -73,7 +73,7 @@ public struct FourierPrepareView<Accessory: View>: View {
                     Text(detailText(progress))
                         .multilineTextAlignment(.trailing)
                 }
-                .fourierTextStyle(.footnote, numbers: .tabular)
+                .fourierTextStyle(.caption, numbers: .tabular)
                 .fourierInk(.secondary)
                 .lineLimit(1)
                 .animation(reduceMotion ? nil : .smooth, value: progress?.stage)
@@ -81,6 +81,7 @@ public struct FourierPrepareView<Accessory: View>: View {
             accessory
         }
         .frame(maxWidth: 400)
+        .fourierGlassPanel()
         .task(id: startsPrepare) {
             guard startsPrepare, !model.isReady else { return }
             await model.prepare()

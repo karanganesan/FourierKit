@@ -7,8 +7,6 @@ struct FourierPlaygroundApp: App {
     @State private var app = AppModel()
 
     init() {
-        // dark only: menus, sheets and panels follow the window
-        NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
         #if DEBUG
         MainThreadWatchdog.shared.start()
         #endif
@@ -19,7 +17,6 @@ struct FourierPlaygroundApp: App {
         Window("fourier playground", id: "main") {
             ContentView()
                 .environment(app)
-                .preferredColorScheme(.dark)
                 .task { await app.launch() }
         }
         .defaultSize(width: 1120, height: 720)
@@ -31,7 +28,6 @@ struct FourierPlaygroundApp: App {
         Settings {
             SettingsView()
                 .environment(app)
-                .preferredColorScheme(.dark)
         }
     }
 }

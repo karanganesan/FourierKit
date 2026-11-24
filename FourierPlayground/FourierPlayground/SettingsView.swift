@@ -32,7 +32,7 @@ private struct SettingsForm<Content: View>: View {
             Section {
                 HStack {
                     Text(app.isBusy ? "changes apply when the current run ends" : "changes apply to the next run")
-                        .fourierTextStyle(.footnote)
+                        .fourierTextStyle(.caption)
                         .fourierInk(.tertiary)
                     Spacer()
                     Button("reset to defaults") { app.resetSettings() }
@@ -42,7 +42,7 @@ private struct SettingsForm<Content: View>: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
-        .background(Color.black)
+        .containerBackground(.regularMaterial, for: .window)
     }
 }
 
@@ -51,7 +51,7 @@ private struct Hint: View {
     init(_ text: String) { self.text = text }
     var body: some View {
         Text(text)
-            .fourierTextStyle(.footnote)
+            .fourierTextStyle(.caption)
             .fourierInk(.tertiary)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -338,7 +338,7 @@ private struct ModelSettings: View {
             Section {
                 LabeledContent("folder") {
                     Text(app.settings.modelDirectory ?? ModelOptions.defaultDirectory.path)
-                        .fourierTextStyle(.footnote)
+                        .fourierTextStyle(.caption)
                         .fourierInk(.secondary)
                         .lineLimit(2)
                         .truncationMode(.middle)
@@ -354,9 +354,9 @@ private struct ModelSettings: View {
             }
             Section {
                 TextField("revision", text: $app.settings.revision)
-                    .fourierTextStyle(.footnote, numbers: .tabular)
+                    .fourierTextStyle(.caption, numbers: .tabular)
                 TextField("sha256", text: $app.settings.sha256, prompt: Text("pinned"))
-                    .fourierTextStyle(.footnote, numbers: .tabular)
+                    .fourierTextStyle(.caption, numbers: .tabular)
                 Toggle("offline", isOn: $app.settings.offline)
             } header: {
                 Text("checkpoint")

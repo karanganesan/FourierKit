@@ -24,6 +24,7 @@ nothing is released yet. this is what exists in the repo.
 ### ui and app
 
 - `FourierKitUI` has the bundled allo variable font and its license. its views cover prepare, permission, the mic button, the level meter, live text, live stats, and one drop-in live view.
+- the ui is one glass surface that follows light and dark, with four type sizes, three text levels and a floating glass bar for the live controls. `FourierControlBar` and `fourierGlassPanel()` are public.
 - `FourierPlayground` is a swiftui mac app with transcribe, record and listen, recent transcripts, a live stats inspector and a settings window for every sdk option. it uses only the public api.
 
 ### golden test

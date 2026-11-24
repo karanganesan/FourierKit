@@ -11,21 +11,36 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var app = app
-        NavigationSplitView {
-            Sidebar()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 224, max: 320)
-        } detail: {
+        // three panes in one row on one surface. a split view would paint its own sidebar and
+        // inspector materials and draw a divider between them, and the window is meant to read as
+        // a single sheet of glass.
+        HStack(spacing: 0) {
+            if app.showSidebar {
+                Sidebar()
+                    .frame(width: 224)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
             Detail()
-                // with the sidebar (200) and the inspector (272) this sets the window's minimum size
+                // with the sidebar (224) and the stats (320) this sets the window's minimum size
                 .frame(minWidth: 440, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
-                .background { Color.black.ignoresSafeArea() }
-                .toolbar { PlaygroundToolbar() }
-                .inspector(isPresented: $app.showStats) {
-                    FourierStatsView(app.state)
-                        .inspectorColumnWidth(min: 272, ideal: 304, max: 400)
-                }
+            if app.showStats {
+                FourierStatsView(app.state)
+                    .frame(width: 320)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
-        .containerBackground(.black, for: .window)
+        .animation(.smooth(duration: 0.24), value: app.showSidebar)
+        .animation(.smooth(duration: 0.24), value: app.showStats)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button("sidebar", systemImage: "sidebar.leading") { app.showSidebar.toggle() }
+                    .help(app.showSidebar ? "hide the sidebar" : "show the sidebar")
+            }
+            PlaygroundToolbar()
+        }
+        // one glass surface for the whole window, in light and dark, with no fills on top of it
+        .containerBackground(.regularMaterial, for: .window)
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .navigationTitle(navigationTitle)
         .task { await app.state.observe() }
         .onChange(of: app.state.isReady, initial: true) { _, ready in
@@ -71,9 +86,14 @@ private struct Sidebar: View {
     @Environment(\.controlActiveState) private var activeState
     @FocusState private var focused: Bool
 
-    /// the accent is white, so the focused selection is a white pill: its label turns black, like a selected tab
+    @Environment(\.colorScheme) private var scheme
+    /// the colour that reads on top of the accent: the accent is white in dark mode and black in light mode
+    private var onAccent: Color { scheme == .dark ? .black : .white }
+
+    /// the focused selection is an accent pill, so its label takes the opposite colour, like a selected tab
     private func inverted(_ item: SidebarItem) -> Bool {
-        app.selection == item && focused && activeState == .key
+        // the selection is a quiet tint of the text colour in every state, so labels never invert
+        false
     }
 
     var body: some View {
@@ -81,7 +101,7 @@ private struct Sidebar: View {
         List(selection: $app.selection) {
             Section {
                 ForEach(Mode.allCases) { mode in
-                    let ink = inverted(.mode(mode)) ? Color.black : Color.primary
+                    let ink = inverted(.mode(mode)) ? onAccent : Color.primary
                     Label {
                         Text(mode.title).fourierTextStyle(.body).foregroundStyle(ink)
                     } icon: {
@@ -94,13 +114,13 @@ private struct Sidebar: View {
             Section {
                 if app.recents.items.isEmpty {
                     Text("transcripts you make show up here")
-                        .fourierTextStyle(.footnote)
+                        .fourierTextStyle(.caption)
                         .fourierInk(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                         .selectionDisabled()
                 } else {
                     ForEach(app.recents.items) { item in
-                        RecentRow(item: item, inverted: inverted(.recent(item.id)))
+                        RecentRow(item: item, inverted: inverted(.recent(item.id)), onAccent: onAccent)
                             .tag(SidebarItem.recent(item.id))
                             .contextMenu {
                                 Button("copy") { Pasteboard.copy(item.text) }
@@ -115,6 +135,8 @@ private struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .tint(Color.primary.opacity(0.16))
+        .scrollContentBackground(.hidden)
         .focused($focused)
         .onDeleteCommand {
             if case .recent(let id) = app.selection { delete(id) }
@@ -129,16 +151,17 @@ private struct Sidebar: View {
 private struct RecentRow: View {
     let item: RecentTranscript
     let inverted: Bool
+    let onAccent: Color
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(item.title)
                 .fourierTextStyle(.body)
-                .foregroundStyle(inverted ? Color.black : Color.primary)
+                .foregroundStyle(inverted ? onAccent : Color.primary)
                 .lineLimit(1)
             Text("\(item.mode.title) · \(item.date.formatted(.relative(presentation: .named)).lowercased())")
                 .fourierTextStyle(.caption)
-                .foregroundStyle(inverted ? Color.black.opacity(0.64) : Color.primary.opacity(0.40))
+                .foregroundStyle(inverted ? onAccent.opacity(0.64) : Color.primary.opacity(0.40))
                 .lineLimit(1)
         }
         .padding(.vertical, 4)

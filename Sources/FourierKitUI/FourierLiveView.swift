@@ -112,15 +112,19 @@ public struct FourierLiveView<Accessory: View>: View {
     }
 
     private func controls(state: FourierStateModel, listen: FourierListenModel) -> some View {
-        HStack(spacing: 24) {
-            // fixed slots either side keep the button centred while the level and time change
-            FourierLevelMeter(level: listen.level, isActive: listen.phase == .listening, barCount: 24)
-                .frame(width: 184, height: 32, alignment: .trailing)
-                .opacity(listen.phase == .listening ? 1 : 0.4)
-            FourierMicButton(listen)
+        FourierControlBar {
+            if listen.phase == .listening {
+                FourierLevelMeter(level: listen.level, isActive: true, barCount: 16)
+                    .frame(width: 120, height: 24)
+                    .padding(.leading, 8)
+                    .transition(.opacity)
+            }
+        } center: {
+            FourierMicButton(listen, diameter: 48)
+                .plain()
                 .disabled(!canListen(state))
+        } trailing: {
             status(listen)
-                .frame(width: 184, alignment: .leading)
         }
         .overlay(alignment: .trailing) {
             accessory
@@ -128,7 +132,7 @@ public struct FourierLiveView<Accessory: View>: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 112)
+        .frame(height: 96)
         .animation(reduceMotion ? nil : .smooth, value: listen.phase)
     }
 
@@ -157,7 +161,7 @@ public struct FourierLiveView<Accessory: View>: View {
                 }
             }
         }
-        .fourierTextStyle(.footnote, numbers: .tabular)
+        .fourierTextStyle(.caption, numbers: .tabular)
         .contentTransition(.opacity)
     }
 

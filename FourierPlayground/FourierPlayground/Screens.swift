@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 // MARK: transcript text
 
-/// a finished transcript on black: a quiet line of facts, then the text, lowercased for display only.
+/// a finished transcript: a quiet line of facts, then the text, lowercased for display only.
 /// copy, share and export use the exact text through the toolbar and menus.
 struct TranscriptText: View {
     let text: String
@@ -16,7 +16,7 @@ struct TranscriptText: View {
             VStack(alignment: .leading, spacing: 16) {
                 if !facts.isEmpty {
                     Text(facts.joined(separator: " · "))
-                        .fourierTextStyle(.footnote, numbers: .tabular)
+                        .fourierTextStyle(.caption, numbers: .tabular)
                         .fourierInk(.tertiary)
                 }
                 Text(text.isEmpty ? "no speech was found." : text.lowercased())
@@ -66,8 +66,8 @@ struct TranscribeScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
             if dropTargeted {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(.white.opacity(0.08))
+                Color.clear
+                    .glassEffect(.regular, in: .rect(cornerRadius: 24, style: .continuous))
                     .padding(16)
                     .allowsHitTesting(false)
                     .transition(.opacity)
@@ -94,12 +94,12 @@ struct TranscribeScreen: View {
         } description: {
             Text(app.transcribe.error.map(FourierFormat.error) ?? "or choose one. it is turned into text on this mac.")
                 .fourierTextStyle(.body)
-                .foregroundStyle(app.transcribe.error == nil ? Color.secondary : Color.red)
+                .foregroundStyle(app.transcribe.error == nil ? Color.primary.opacity(0.64) : Color.red)
         } actions: {
             Button("choose file…") { app.transcribe.choosing = true }
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
-                .fourierTextStyle(.body.weight(500))
+                .fourierTextStyle(.body)
                 .keyboardShortcut(.defaultAction)
         }
     }
@@ -112,7 +112,7 @@ struct TranscribeScreen: View {
                 .truncationMode(.middle)
             ProgressView(value: app.transcribe.fraction)
                 .progressViewStyle(.linear)
-                .tint(.white)
+                .tint(.primary)
                 .animation(.smooth(duration: 0.4), value: app.transcribe.fraction)
                 .accessibilityLabel("transcribing")
             HStack {
@@ -120,14 +120,15 @@ struct TranscribeScreen: View {
                 Spacer()
                 Text(FourierFormat.percent(app.transcribe.fraction))
             }
-            .fourierTextStyle(.footnote, numbers: .tabular)
+            .fourierTextStyle(.caption, numbers: .tabular)
             .fourierInk(.secondary)
             Button("cancel") { app.transcribe.cancel() }
                 .buttonStyle(.glass)
-                .fourierTextStyle(.body.weight(500))
+                .fourierTextStyle(.body)
                 .keyboardShortcut(.cancelAction)
         }
         .frame(maxWidth: 400)
+        .fourierGlassPanel()
         .padding(32)
     }
 
@@ -181,7 +182,7 @@ struct RecordScreen: View {
                         .frame(height: 96)
                     TimelineView(.periodic(from: record.startedAt ?? .now, by: 1)) { context in
                         Text(FourierFormat.clock(.seconds(context.date.timeIntervalSince(record.startedAt ?? context.date))))
-                            .fourierTextStyle(.display, numbers: .tabular)
+                            .fourierTextStyle(.largeTitle, numbers: .tabular)
                             .fourierInk(.primary)
                             .accessibilityLabel("recording time")
                     }
@@ -193,10 +194,11 @@ struct RecordScreen: View {
                         .fourierTextStyle(.title)
                     ProgressView(value: record.fraction)
                         .progressViewStyle(.linear)
-                        .tint(.white)
+                        .tint(.primary)
                         .animation(.smooth(duration: 0.4), value: record.fraction)
                 }
                 .frame(maxWidth: 400)
+                .fourierGlassPanel()
                 .padding(32)
             case .idle:
                 if let transcript = record.transcript {
@@ -207,7 +209,7 @@ struct RecordScreen: View {
                             .fourierTextStyle(.title)
                         Text(record.error.map(FourierFormat.error) ?? "the recording stays on this mac and is turned into text when you stop.")
                             .fourierTextStyle(.body)
-                            .foregroundStyle(record.error == nil ? Color.secondary : Color.red)
+                            .foregroundStyle(record.error == nil ? Color.primary.opacity(0.64) : Color.red)
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: 400)
@@ -218,32 +220,25 @@ struct RecordScreen: View {
     }
 
     private func controls(_ record: RecordModel) -> some View {
-        VStack(spacing: 8) {
-            FourierMicButton(status: record.micStatus, diameter: 80, action: record.toggle) { status in
-                if status == .idle {
-                    Color.clear
-                } else {
-                    FourierMicSymbol(status: status, size: 28)
-                }
+        FourierControlBar {
+            EmptyView()
+        } center: {
+            FourierMicButton(status: record.micStatus, diameter: 48, action: record.toggle) { status in
+                // red means record, as in voice memos
+                Image(systemName: status == .idle ? "circle.fill" : "stop.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(status == .idle ? Color.red : Color.primary)
+                    .contentTransition(.symbolEffect(.replace))
             }
-            .overlay {
-                // red means record, as in voice memos. drawn above the glass so the colour stays solid
-                if record.phase == .idle {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 32, height: 32)
-                        .allowsHitTesting(false)
-                        .transition(.scale(scale: 0.5).combined(with: .opacity))
-                }
-            }
-            .animation(.smooth(duration: 0.24), value: record.phase)
+            .plain()
             .accessibilityLabel(record.isRunning ? "stop recording" : "start recording")
             .disabled(!canRecord)
+        } trailing: {
             Text(record.isRunning ? "space to stop" : "space to record")
-                .fourierTextStyle(.footnote)
+                .fourierTextStyle(.caption)
                 .fourierInk(.tertiary)
         }
-        .frame(height: 144)
+        .frame(height: 96)
         .frame(maxWidth: .infinity)
     }
 }
@@ -284,7 +279,7 @@ struct RecentScreen: View {
             } actions: {
                 Button("listen") { app.selection = .mode(.listen) }
                     .buttonStyle(.glass)
-                    .fourierTextStyle(.body.weight(500))
+                    .fourierTextStyle(.body)
             }
         }
     }
