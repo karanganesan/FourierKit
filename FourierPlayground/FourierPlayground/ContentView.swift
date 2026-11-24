@@ -10,41 +10,14 @@ struct ContentView: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        @Bindable var app = app
-        // three panes in one row on one surface. a split view would paint its own sidebar and
-        // inspector materials and draw a divider between them, and the window is meant to read as
-        // a single sheet of glass.
-        HStack(spacing: 0) {
-            if app.showSidebar {
-                Sidebar()
-                    .frame(width: 224)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+        Panes()
+            .background { TextPresence() }
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    ToolIcon("sidebar", symbol: "sidebar.leading", help: "show or hide the sidebar") { app.showSidebar.toggle() }
+                }
+                PlaygroundToolbar()
             }
-            Detail()
-                // with the sidebar (224) and the stats (320) this sets the window's minimum size
-                .frame(minWidth: 440, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
-            if app.showStats {
-                FourierStatsView(app.state)
-                    .frame(width: 320)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-            if app.showCode {
-                CodePane()
-                    .frame(width: 400)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-        }
-        .background { TextPresence() }
-        .animation(.smooth(duration: 0.24), value: app.showSidebar)
-        .animation(.smooth(duration: 0.24), value: app.showStats)
-        .animation(.smooth(duration: 0.24), value: app.showCode)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button("sidebar", systemImage: "sidebar.leading") { app.showSidebar.toggle() }
-                    .help("show or hide the sidebar")
-            }
-            PlaygroundToolbar()
-        }
         // one glass surface for the whole window, in light and dark, with no fills on top of it
         .fourierGlassWindow()
         // no bar behind the toolbar: its buttons float on the window like everything else
@@ -56,7 +29,6 @@ struct ContentView: View {
         }
         .onAppear(perform: restore)
         .onChange(of: app.selection) { _, selection in storedSelection = selection.rawValue }
-        .onChange(of: app.showStats) { _, show in storedStats = show }
         .onChange(of: app.isBusy, initial: true) { _, busy in
             #if DEBUG
             MainThreadWatchdog.shared.setMeasuring(busy, label: app.selection.rawValue)
@@ -83,6 +55,90 @@ struct ContentView: View {
         guard !app.launchOptions.isAutomated else { return }
         if let item = SidebarItem(rawValue: storedSelection) { app.selection = item }
         app.showStats = storedStats
+    }
+}
+
+// MARK: panes
+
+/// the sidebar, the content and the trailing pane in one row on one surface. a split view would
+/// paint its own sidebar and inspector materials and draw a divider between them, and the window
+/// is meant to read as a single sheet of glass.
+///
+/// this is a view of its own so that opening or closing a pane re-evaluates only this row. the
+/// toolbar lives on the parent and is never rebuilt by a pane.
+private struct Panes: View {
+    @Environment(AppModel.self) private var app
+    @SceneStorage("showStats") private var storedStats = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if app.showSidebar {
+                Sidebar()
+                    .frame(width: 224)
+                    .transition(.opacity)
+            }
+            Detail()
+                // with the sidebar (224) and the widest trailing pane (400) this sets the window's minimum size
+                .frame(minWidth: 440, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
+            if app.showStats {
+                FourierStatsView(app.state)
+                    .frame(width: 320)
+                    .transition(.opacity)
+            }
+            if app.showCode {
+                CodePane()
+                    .frame(width: 400)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.smooth(duration: 0.16), value: app.showSidebar)
+        .animation(.smooth(duration: 0.16), value: app.showStats)
+        .animation(.smooth(duration: 0.16), value: app.showCode)
+        .onChange(of: app.showStats) { _, show in storedStats = show }
+    }
+}
+
+/// one toolbar button, drawn here so its states are ours: a faint tint of the text colour on
+/// hover and on press, and nothing darker. the system's own toolbar button goes black when pressed.
+struct ToolIcon: View {
+    let title: String
+    let symbol: String
+    let help: String
+    let action: () -> Void
+    @Environment(\.isEnabled) private var enabled
+    @State private var hovering = false
+
+    init(_ title: String, symbol: String, help: String, action: @escaping () -> Void) {
+        self.title = title
+        self.symbol = symbol
+        self.help = help
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .medium))
+                .frame(width: 32, height: 32)
+                .contentShape(.circle)
+        }
+        .buttonStyle(ToolIconStyle(hovering: hovering && enabled))
+        .onHover { hovering = $0 }
+        .help(help)
+        .accessibilityLabel(title)
+    }
+}
+
+private struct ToolIconStyle: ButtonStyle {
+    let hovering: Bool
+    @Environment(\.isEnabled) private var enabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(Color.primary.opacity(enabled ? 1 : 0.4))
+            .background {
+                Circle().fill(Color.primary.opacity(configuration.isPressed ? 0.16 : hovering ? 0.08 : 0))
+            }
     }
 }
 
@@ -267,36 +323,35 @@ private struct PlaygroundToolbar: ToolbarContent {
         // the toolbar reads only values that change when the user does something. the text itself
         // is fetched when a button is pressed, never while drawing.
         let hasText = app.hasText
-        ToolbarItemGroup(placement: .primaryAction) {
-            if app.canToggleCurrent {
-                Button(app.toggleTitle, systemImage: toggleSymbol) { app.toggleCurrent() }
-                    .help(app.toggleTitle)
+        ToolbarItem(placement: .primaryAction) {
+            HStack(spacing: 0) {
+                if app.canToggleCurrent {
+                    ToolIcon(app.toggleTitle, symbol: toggleSymbol, help: app.toggleTitle) { app.toggleCurrent() }
+                }
+                ToolIcon("copy", symbol: "doc.on.doc", help: "copy transcript") {
+                    if let text = app.currentText { Pasteboard.copy(text) }
+                }
+                .disabled(!hasText)
+                ToolIcon("share", symbol: "square.and.arrow.up", help: "share transcript") {
+                    if let text = app.currentText { SharePicker.show(text) }
+                }
+                .disabled(!hasText)
+                ToolIcon("export", symbol: "arrow.down.document", help: "export as text") {
+                    exportText = app.currentText ?? ""
+                    exporting = true
+                }
+                .disabled(!hasText)
+                ToolIcon("code", symbol: "chevron.left.forwardslash.chevron.right", help: "show or hide the code for this screen") {
+                    app.showCode.toggle()
+                }
             }
-            Button("copy", systemImage: "doc.on.doc") {
-                if let text = app.currentText { Pasteboard.copy(text) }
-            }
-            .help("copy transcript")
-            .disabled(!hasText)
-            Button("share", systemImage: "square.and.arrow.up") {
-                if let text = app.currentText { SharePicker.show(text) }
-            }
-            .help("share transcript")
-            .disabled(!hasText)
-            Button("export", systemImage: "arrow.down.document") {
-                exportText = app.currentText ?? ""
-                exporting = true
-            }
-            .help("export as text")
-            .disabled(!hasText)
+            .padding(.horizontal, 4)
             .fileExporter(isPresented: $exporting, document: TextFile(text: exportText), contentType: .plainText,
                           defaultFilename: "transcript") { _ in }
-            Button("code", systemImage: "chevron.left.forwardslash.chevron.right") { app.showCode.toggle() }
-                .help("show or hide the code for this screen")
         }
         ToolbarSpacer(.fixed, placement: .primaryAction)
         ToolbarItem(placement: .primaryAction) {
-            Button("stats", systemImage: "chart.xyaxis.line") { app.showStats.toggle() }
-                .help("show or hide live stats")
+            ToolIcon("stats", symbol: "chart.xyaxis.line", help: "show or hide live stats") { app.showStats.toggle() }
         }
     }
 
