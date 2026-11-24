@@ -40,6 +40,8 @@ struct ContentView: View {
         }
         // one glass surface for the whole window, in light and dark, with no fills on top of it
         .fourierGlassWindow()
+        // no bar behind the toolbar: its buttons float on the window like everything else
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .navigationTitle(navigationTitle)
         .task { await app.state.observe() }
         .onChange(of: app.state.isReady, initial: true) { _, ready in
