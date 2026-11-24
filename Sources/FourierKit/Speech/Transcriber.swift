@@ -94,7 +94,9 @@ enum Transcriber {
         texts.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
-    static func transcript(outcomes: [Outcome], offset: Int = 0, audioSamples: Int, plan: DecodePlan, started: Double) -> Transcript {
+    /// - parameter live: the audio arrived in real time, so wall-clock time says nothing about the
+    ///   engine. speed is then the audio that was decoded over the time the engine spent on it.
+    static func transcript(outcomes: [Outcome], offset: Int = 0, audioSamples: Int, plan: DecodePlan, started: Double, live: Bool = false) -> Transcript {
         let elapsed = now() - started
         var metrics = TranscriptMetrics()
         metrics.elapsed = .seconds(elapsed)
@@ -117,6 +119,13 @@ enum Transcriber {
             first = min(first ?? firstText, firstText)
         }
         metrics.timeToFirstText = first.map { .seconds(max(0, $0)) }
+        if live {
+            let decoded = Double(outcomes.reduce(0) { $0 + $1.range.count }) / 16_000
+            let working = outcomes.reduce(0.0) {
+                $0 + $1.result.timings.mel + $1.result.timings.encode + $1.result.timings.prefill + $1.result.timings.decode
+            }
+            metrics.realtimeSpeed = working > 0 ? decoded / working : 0
+        }
         let pieces = outcomes.map { outcome in
             TranscriptPiece(
                 text: outcome.result.text,

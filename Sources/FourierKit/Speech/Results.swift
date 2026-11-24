@@ -42,7 +42,8 @@ public struct TranscriptPiece: Sendable, Hashable {
 }
 
 public struct TranscriptMetrics: Sendable, Hashable {
-    /// seconds of audio per second of wall time, from the call to the result
+    /// seconds of audio per second of wall time, from the call to the result. for a live session,
+    /// where audio arrives in real time, it is the audio decoded over the time the engine worked on it.
     public var realtimeSpeed: Double = 0
     /// from the call to the first decoded token
     public var timeToFirstText: Duration?

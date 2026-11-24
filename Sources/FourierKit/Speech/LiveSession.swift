@@ -335,13 +335,13 @@ actor LiveEngine {
                     outcomes.append(outcome)
                 }
             }
-            return Transcriber.transcript(outcomes: outcomes, audioSamples: heard, plan: finalPlan, started: startedAt)
+            return Transcriber.transcript(outcomes: outcomes, audioSamples: heard, plan: finalPlan, started: startedAt, live: true)
         case .fullAudio:
             // `audio` was never trimmed in this mode, so it holds everything from position 0
             let samples = audio
             let ranges = Transcriber.ranges(samples: samples, chunking: .automatic)
             let outcomes = samples.isEmpty ? [] : try await Transcriber.decode(samples: samples, ranges: ranges, plan: finalPlan)
-            return Transcriber.transcript(outcomes: outcomes, audioSamples: heard, plan: finalPlan, started: startedAt)
+            return Transcriber.transcript(outcomes: outcomes, audioSamples: heard, plan: finalPlan, started: startedAt, live: true)
         }
     }
 
