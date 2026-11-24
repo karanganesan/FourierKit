@@ -1,5 +1,12 @@
 # changelog
 
+## unreleased
+
+- the sdk and the playground build for ios and ipados as well as macos. every limit is derived from the device at load: memory headroom, core counts, the gpu's buffer and working-set sizes, the neural engine.
+- a second bandwidth kernel computes three rows per thread, bit-identical to the first. twelve medium clips at once go from about 7x to 12x realtime.
+- live drafts grow token by token: an update every 50 to 70 ms at the median, where one used to arrive only when a pass ended.
+- in full screen the toolbar steps aside, so no bar is drawn behind it.
+
 ## 0.0.2
 
 - the app is one glass surface that follows light and dark, with a floating glass bar for live controls, glass panels for loading and progress, three type sizes and three text levels.

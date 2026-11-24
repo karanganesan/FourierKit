@@ -103,17 +103,18 @@ the test needs the model prepared on this mac and the golden tensors in `golden/
 
 every golden run appends one line to `docs/performance.jsonl`. [docs/performance.html](docs/performance.html) is built from that log and holds the scoreboard, the baselines, the climb over runs and the method. the numbers live there, not here.
 
-the newest passing line today is labelled "prefill attention on the matrix kernel, quiet machine", measured warm in thermal state 1 (fair) on a fanless m4 macbook air with 32 gb.
+the newest passing line today is labelled "three-row kernel and token streaming, quiet machine", measured warm in thermal state 1 (fair) on a fanless m4 macbook air with 32 gb.
 
 | clip | audio | fourierkit, x realtime | transformers on the same mac, x realtime | time to first text |
 |---|---|---|---|---|
-| short | 3.7 s | 4.33 | 1.10 | 0.30 s |
-| medium | 11.2 s | 6.24 | 1.18 | 0.45 s |
-| long | 116.5 s | 6.34 | 0.81 | 3.26 s |
+| short | 3.7 s | 4.34 | 1.10 | 0.30 s |
+| medium | 11.2 s | 6.25 | 1.18 | 0.45 s |
+| long | 116.5 s | 6.39 | 0.81 | 3.21 s |
 
-- three clips in one batch ran at 6.3x realtime in total, and nine pieces sustained ran at 6.2x.
-- the decoder ran 19.2 to 21.7 steps per second. reading the weights alone caps it near 26.
-- played in live at real speed, first text came after 0.7 to 1.1 s and the median draft delay was 0.4 to 0.8 s. the plan's goal of a first draft in about half a second is not met yet.
+- many files at once: twelve 11-second clips in one batch ran at 12.4x realtime in total on a cool machine and 9.8x on a warm one. clips of mixed length gain less, because each long clip is still read in alone.
+- the golden run's own batch figures were 6.2x for three clips together and 4.3x sustained, taken after forty minutes of back-to-back runs on a fanless mac. heat costs this machine a third of its speed.
+- the decoder ran 19.4 to 21.7 steps per second. reading the weights alone caps it near 26.
+- played in live at real speed, first text came after 0.46 to 0.76 s and text then grows token by token, with a new update every 50 to 70 ms at the median.
 - the transformers column is the cpu reference run recorded in `golden/manifest.json` (`reference_seconds`).
 
 what was tried, kept and dropped is in the tries section of the performance page. the encoder also runs on the neural engine, 3x faster than on the gpu, but its 16-bit math uses 35 to 44 times the safety margin, so it is not a default and is outside the exactness claim.
