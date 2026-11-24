@@ -397,7 +397,8 @@ struct BeamSearch: Sendable {
     /// feed one row of raw float32 logits per running beam (`numBeams * vocabularySize`, row-major).
     /// the first call takes the prefill logits repeated on every row. returns, for each new running
     /// beam, the beam it continues (what transformers passes to reorder_cache), and the first
-    /// `min(recordCandidates, max(2, 1 + eos count) * numBeams)` candidates of the step in order.
+    /// `recordCandidates` candidates of the step in order (up to `numBeams * vocabularySize`). the
+    /// ones past `max(2, 1 + eos count) * numBeams` are not part of any decision.
     mutating func advance(logits: UnsafeBufferPointer<Float>) -> (parents: [Int], candidates: [Candidate]) {
         advance(rows: logits, normalized: false)
     }
@@ -509,6 +510,15 @@ struct BeamSearch: Sendable {
         let allHit = hits.allSatisfy { $0 }
         isFinished = !earlyStopUnsatisfied || allHit
 
+        if recordCandidates > beamsToKeep {
+            // diagnostics only: the decisions above used `top`. this is a second, wider torch.topk
+            // over the same scores, so the extra ranks come out in torch's order. it never feeds
+            // back into the search, and it only runs when more than `beamsToKeep` were asked for.
+            let wide = accumulated.withUnsafeBufferPointer { acc in
+                topK(acc.baseAddress!, k * v, min(recordCandidates, k * v), &heap, mayContainNaN: mayContainNaN)
+            }
+            return (parents, wide.map { Candidate(score: $0.value, beam: Int($0.index) / v, token: Int32(Int($0.index) % v)) })
+        }
         let recorded = min(recordCandidates, beamsToKeep)
         let candidates = (0..<recorded).map {
             Candidate(score: candidateScores[$0], beam: candidateBeams[$0], token: candidateTokens[$0])

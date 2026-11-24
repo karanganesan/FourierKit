@@ -3,7 +3,12 @@
 the reference: transformers at one pinned commit, the pinned checkpoint, cpu, 32-bit float,
 a batch of one, apply_transcription_request(language="en"), no system prompt, and the model's
 generation defaults. a second 64-bit run measures 32-bit noise, and a clip is rejected if any of
-its beam comparisons sits inside that noise.
+its top-candidate comparisons sits inside that noise (see `gaps`).
+
+nothing is written into the output directory (default golden/) unless every clip passed that
+check: the set is built in a temporary directory beside it and moved into place at the end.
+--skip-float64 skips the check, and then needs --unvalidated and writes "validated": false, which
+the golden test refuses.
 
 run from the repo root:  uv run --project reference/python python reference/python/make_golden.py
 this never ships and is not a dependency of the kit.
@@ -13,7 +18,9 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -29,6 +36,7 @@ REVISION = "8c2a8871f1304aa2f634da4fb95e24438c4945b9"
 WEIGHTS_SHA256 = "e64765ffdd90c83704c0951e0d88b7f2ed84499af5c208f7ddf8d922cf08441c"
 CLIPS = ["short", "medium", "long"]
 RECORDED = 10  # top candidates saved per step: the 9 that beam search keeps, plus the first one it drops
+MARGIN_LIMIT = 0.5  # a clip is rejected when a comparison uses this much of its margin; the test reads it from the manifest
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MODEL_DIR = (
     Path.home() / "Library/Application Support/FourierKit/models/oruk--oruk-fourier-2b" / REVISION
@@ -69,6 +77,20 @@ class TopKRecorder:
 
     def __exit__(self, *exc):
         torch.topk = self.original
+
+
+def plain_seconds(model, processor, samples):
+    """seconds of one plain warm generate: no recording hooks, no scores or logits kept.
+
+    the caller has already run generate once, so one-time costs are paid.
+    """
+    inputs = processor.apply_transcription_request(
+        language="en", audio=samples, sampling_rate=16000, return_tensors="pt"
+    ).to("cpu", dtype=torch.float32)
+    started = time.perf_counter()
+    with torch.inference_mode():
+        model.generate(**inputs)
+    return time.perf_counter() - started
 
 
 def run(model, processor, samples, dtype):
@@ -117,8 +139,11 @@ def run(model, processor, samples, dtype):
 def gaps(scores):
     """the gap between neighbours among the ranked candidates of every step.
 
-    covers every comparison beam search makes: the order of the kept 9, and the cut between the
-    9th and the 10th. candidates near -1e9 are masked beams or banned tokens and are skipped.
+    these are the comparisons that rank the candidates of one step: the order of the 9 that beam
+    search keeps, and the cut between the 9th and the 10th. they are not every comparison beam
+    search makes: the finished-set ranking (length-penalised scores of different steps) and the
+    stop heuristic are not in these gaps; the golden test checks them from the same recorded scores.
+    candidates near -1e9 are masked beams or banned tokens and are skipped.
     """
     return scores[:, :-1] - scores[:, 1:], scores[:, 1:] > -1e8
 
@@ -129,7 +154,7 @@ def smallest_gap(scores):
 
 
 def margin_used(reference, other):
-    """how much of the safety margin a second run uses, over every comparison.
+    """how much of the safety margin a second run uses, over every gap in `gaps`.
 
     a comparison keeps its order when the other run's gap is off by less than half the reference
     gap. this returns the worst ratio of gap error to half the gap, so under 1 means every
@@ -144,9 +169,16 @@ def margin_used(reference, other):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default=str(DEFAULT_MODEL_DIR))
-    parser.add_argument("--skip-float64", action="store_true")
+    parser.add_argument("--skip-float64", action="store_true", help="skip the 64-bit noise check; needs --unvalidated")
+    parser.add_argument("--unvalidated", action="store_true", help="allow writing a set without the noise check, marked validated: false")
+    parser.add_argument("--output", default=str(ROOT / "golden"), help="directory for manifest.json and tensors/ (default: the repo's golden/)")
     parser.add_argument("--clips", nargs="*", default=CLIPS)
     args = parser.parse_args()
+    if args.skip_float64 and not args.unvalidated:
+        sys.exit("--skip-float64 writes a golden set with no noise check. pass --unvalidated as well to write it, marked validated: false")
+    if args.unvalidated and not args.skip_float64:
+        sys.exit("--unvalidated only goes with --skip-float64")
+    output = Path(args.output).resolve()
 
     model_dir = Path(args.model)
     weights = model_dir / "model.safetensors"
@@ -161,8 +193,17 @@ def main():
     generation = model.generation_config
     eos = list(generation.eos_token_id)
 
-    tensors_dir = ROOT / "golden" / "tensors"
-    tensors_dir.mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{output.name}-staging-", dir=output.parent))
+    try:
+        build(args, model, processor, generation, eos, weights_hash, staging, output)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def build(args, model, processor, generation, eos, weights_hash, staging, output):
+    tensors_dir = staging / "tensors"
+    tensors_dir.mkdir()
     clips = {}
     results = {}
     for name in args.clips:
@@ -198,9 +239,21 @@ def main():
             "final_text": final_text,
             "sequence_score": result["sequence_score"],
             "smallest_gap": smallest_gap(result["top_scores"]),
+            # one instrumented run: extra top-k, output scores and logits, and the first call's
+            # warm-up on the first clip. not a plain warm generate; see reference_seconds_plain.
             "reference_seconds": result["seconds"],
         }
         print(f"  {len(ids)} tokens in {result['seconds']:.1f} s: {final_text[:96]}", flush=True)
+
+    # a plain warm generate per clip, timed apart from the instrumented runs above (which record
+    # top-k, scores and logits, and pay the first call's warm-up on the first clip). one warm-up
+    # call first, on the shortest clip.
+    warm_up = sf.read(ROOT / "golden" / "clips" / f"{args.clips[0]}.wav", dtype="float32", always_2d=False)[0]
+    plain_seconds(model, processor, warm_up)
+    for name in args.clips:
+        samples, _ = sf.read(ROOT / "golden" / "clips" / f"{name}.wav", dtype="float32", always_2d=False)
+        clips[name]["reference_seconds_plain"] = plain_seconds(model, processor, samples)
+        print(f"{name}: plain warm generate {clips[name]['reference_seconds_plain']:.1f} s", flush=True)
 
     rejected = []
     if not args.skip_float64:
@@ -234,8 +287,11 @@ def main():
                   f"margin used {used}, smallest gap {clips[name]['smallest_gap']}", flush=True)
             # at 1 the reference itself would be one rounding away from another answer. half of
             # that keeps a clip well clear of 32-bit noise.
-            if not same or not same_candidates or used >= 0.5:
+            if not same or not same_candidates or used >= MARGIN_LIMIT:
                 rejected.append(name)
+
+    if rejected:
+        sys.exit(f"{rejected} have a top-candidate comparison inside 32-bit noise, so they are rejected as golden clips. nothing was written to {output}")
 
     tensor_hashes = {}
     for name in args.clips:
@@ -284,6 +340,8 @@ def main():
             "pad_token_id": generation.pad_token_id,
             "banned_tokens": len(generation.bad_words_ids),
         },
+        "validated": not args.skip_float64,
+        "margin_threshold": MARGIN_LIMIT,
         "recorded_candidates": RECORDED,
         "source": {
             "title": "the gettysburg address, read for librivox",
@@ -293,11 +351,15 @@ def main():
         },
         "clips": clips,
     }
-    target = ROOT / "golden" / "manifest.json"
-    target.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
-    print(f"wrote {target}", flush=True)
-    if rejected:
-        sys.exit(f"{rejected} have a beam comparison inside 32-bit noise, so they are rejected as golden clips")
+    (staging / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+
+    # every clip passed: move the set into place, tensors first so a manifest never points at a missing file
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "tensors").mkdir(exist_ok=True)
+    for name in args.clips:
+        os.replace(tensors_dir / f"{name}.safetensors", output / "tensors" / f"{name}.safetensors")
+    os.replace(staging / "manifest.json", output / "manifest.json")
+    print(f"wrote {output / 'manifest.json'}" + ("" if manifest["validated"] else " (unvalidated)"), flush=True)
 
 
 if __name__ == "__main__":
