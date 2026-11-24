@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#000000">
 <title>fourier: architecture</title>
-<link rel="preconnect" href="https://rsms.me/">
-<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<link rel="preconnect" href="https://cdn.karanganesan.com" crossorigin>
+<link rel="preload" href="https://cdn.karanganesan.com/1794861360796-04033bdf1852/fonts/allo/AlloVariable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="https://cdn.karanganesan.com/1794861360796-04033bdf1852/fonts/allo/allo.css">
 <style>
 :root {
   color-scheme: dark;
@@ -19,11 +20,8 @@
   --gpu: rgb(255 255 255 / .56);
   --cpu: rgb(255 255 255 / .16);
   --ease: cubic-bezier(.23, 1, .32, 1);
-  font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
-  font-feature-settings: 'liga' 1, 'calt' 1;
-}
-@supports (font-variation-settings: normal) {
-  :root { font-family: InterVariable, Inter, -apple-system, BlinkMacSystemFont, sans-serif; }
+  font-family: Allo, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-optical-sizing: auto;
 }
 * { box-sizing: border-box; }
 html { background: #000; -webkit-text-size-adjust: 100%; scroll-padding-top: 80px; }
@@ -133,8 +131,8 @@ button[aria-pressed=true] { background: #fff; color: #000; }
 @media (hover: hover) and (pointer: fine) { button[aria-pressed=false]:hover { background: var(--w16); color: #fff; } }
 .note { min-height: 48px; margin-top: 16px; color: var(--w64); }
 .packer { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; margin-top: 16px; }
-.lanes { position: relative; height: 312px; }
-.lane-labels { position: relative; height: 312px; font-size: 14px; color: var(--w64); }
+.lanes { position: relative; height: 384px; }
+.lane-labels { position: relative; height: 384px; font-size: 14px; color: var(--w64); }
 .lane-labels span { position: absolute; left: 0; display: flex; align-items: center; }
 .lane { position: absolute; left: 0; right: 0; background: var(--w8); }
 .free { display: flex; align-items: center; justify-content: center; color: var(--w56); font-size: 12px; }
@@ -145,7 +143,7 @@ button[aria-pressed=true] { background: #fff; color: #000; }
   width: calc(100% / 12);
   height: 24px;
   padding: 2px;
-  transition: transform 320ms var(--ease);
+  transition: transform 320ms var(--ease), opacity 160ms var(--ease);
   will-change: transform;
 }
 .tile i {
@@ -161,7 +159,8 @@ button[aria-pressed=true] { background: #fff; color: #000; }
   font-variant-numeric: tabular-nums;
   transition: background-color 160ms var(--ease), color 160ms var(--ease);
 }
-.tile.static { transition: none; will-change: auto; }
+.tile.hidden { opacity: 0; }
+.stat { margin-bottom: 8px; font-size: 32px; line-height: 40px; font-weight: 600; letter-spacing: -.024em; font-variant-numeric: tabular-nums; }
 .tile.on-n i { background: var(--npu); color: #000; }
 .tile.on-g i { background: var(--gpu); color: #000; }
 .tile.on-c i { background: var(--w24); color: #fff; }
@@ -174,7 +173,7 @@ button[aria-pressed=true] { background: #fff; color: #000; }
 .mini .n { background: var(--npu); } .mini .g { background: var(--gpu); } .mini .c { background: var(--w24); }
 
 .bars { display: grid; gap: 16px; margin-top: 24px; padding: 24px; background: var(--w8); }
-.bar-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) 128px; align-items: center; gap: 16px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.bar-row { display: grid; grid-template-columns: 192px minmax(0, 1fr) 128px; align-items: center; gap: 16px; font-size: 14px; font-variant-numeric: tabular-nums; }
 .bar { height: 24px; border-radius: 4px; background: var(--gpu); transform-origin: left; }
 .bar-row span:last-child { text-align: right; color: var(--w64); }
 
@@ -202,7 +201,7 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
   .ways { grid-template-columns: 1fr; }
   .packer { grid-template-columns: 40px minmax(0, 1fr); }
   .tile i { font-size: 8px; }
-  .bar-row { grid-template-columns: 48px minmax(0, 1fr) 96px; gap: 8px; }
+  .bar-row { grid-template-columns: 120px minmax(0, 1fr) 72px; gap: 8px; }
   .steps th[scope=row] { min-width: 224px; }
   button { height: 48px; }
 }
@@ -245,63 +244,88 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
     </div>
   </section>
 
-  <section aria-labelledby="packing">
-    <h2 id="packing">same work, four packings</h2>
-    <p class="dim">three audio blocks, each with mel (m), encoder (e), decoder (d) and beam work (b). a column is one turn in order. it is not a timing.</p>
-    <div class="switch" id="switch" role="group" aria-label="choose a packing"></div>
-    <p class="note" id="note" aria-live="polite"></p>
-    <div class="packer">
-      <div class="lane-labels" id="lane-labels" aria-hidden="true"></div>
-      <div class="lanes" id="lanes" role="img" aria-label="schematic of work tiles arranged across npu, gpu, cpu and main thread lanes"></div>
+  <section aria-labelledby="time">
+    <h2 id="time">where the work is</h2>
+    <p class="dim">for one 2-minute clip, the decoder does almost all the memory work, so the packing is built around it. these are estimates until measured.</p>
+    <div class="ways">
+      <article class="way"><div class="stat">15</div><h3>encoder blocks</h3><p>fixed 8-second blocks that can run as one batch.</p></article>
+      <article class="way"><div class="stat">~410</div><h3>decoder steps</h3><p>one per token, and each step depends on the last.</p></article>
+      <article class="way"><div class="stat">~2,000x</div><h3>more weight data</h3><p>read by the batched decoder than by one batched encoder pass.</p></article>
     </div>
   </section>
 
   <section aria-labelledby="combined">
     <h2 id="combined">the combined engine</h2>
-    <p class="dim">this is the goal: all of it at once. every chip has its next job ready before the current one ends, so no chip sits idle while work remains. the number on a tile is its batch, and a column is one turn in order, not a timing.</p>
+    <p class="dim">one wide decoder batch on the fastest chip, the encoder working ahead on the other, and the cpu running beam logic. x, y and z are audio pieces, a number is a decoder step, and each row of a piece is a beam. a column is one turn in order, not a timing.</p>
+    <div class="switch" id="switch" role="group" aria-label="choose a packing"></div>
+    <p class="note" id="note" aria-live="polite"></p>
     <div class="packer">
-      <div class="lane-labels" id="combined-labels" aria-hidden="true"></div>
-      <div class="lanes" id="combined-lanes" role="img" aria-label="nine batches flowing through cpu, npu and gpu at the same time, with every chip busy after the first turns and the main thread free"></div>
+      <div class="lane-labels" id="lane-labels" aria-hidden="true"></div>
+      <div class="lanes" id="lanes" role="img" aria-label="work tiles arranged across npu, gpu, cpu and main thread lanes for the chosen packing"></div>
     </div>
+    <p class="dim small">the decoder is drawn on the gpu and the encoder on the npu as an example. the race decides which chip gets which.</p>
     <h3 style="margin-top:32px">how calls get packed</h3>
     <ol class="rules">
-      <li><strong>keep every chip fed.</strong> the next batch is queued before the current one finishes.</li>
+      <li><strong>one wide decoder batch.</strong> beams and pieces share each weight read.</li>
+      <li><strong>refill slots at once.</strong> when a piece ends, the next one takes its slot without draining the batch.</li>
+      <li><strong>encoder works ahead.</strong> the other chip prepares the next piece, so the batch never waits for audio.</li>
+      <li><strong>never move beam data.</strong> cache rows stay put, and a small index table tracks which beam owns each row.</li>
       <li><strong>pack the calls.</strong> many pieces go into one gpu command buffer or one npu batch, and the next call is prepared while this one runs.</li>
-      <li><strong>fill the token gap.</strong> one stream must wait for its last token, so other pieces use the chip during that wait.</li>
-      <li><strong>never copy.</strong> chips hand off shared memory buffers.</li>
       <li><strong>slow down, never overflow.</strong> bounded queues hold back the stage before a slow one.</li>
       <li><strong>recover on its own.</strong> if a chip call fails or falls back, that piece reruns on the exact gpu path.</li>
     </ol>
   </section>
 
-  <section aria-labelledby="ways">
+  <section aria-labelledby="dynamic">
+    <h2 id="dynamic">it packs itself for the workload</h2>
+    <p class="dim">the sdk reads what it was given and how busy the machine is, then re-plans before every decoder step. the caller sets nothing.</p>
+    <div class="switch" id="load-switch" role="group" aria-label="choose a workload"></div>
+    <p class="note" id="load-note" aria-live="polite"></p>
+    <div class="packer">
+      <div class="lane-labels" id="load-labels" aria-hidden="true"></div>
+      <div class="lanes" id="load-lanes" role="img" aria-label="work tiles arranged across npu, gpu, cpu and main thread lanes for the chosen workload"></div>
+    </div>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="packing by workload">
+      <table>
+        <thead><tr><th scope="col">workload</th><th scope="col">starting size</th><th scope="col">what wins</th><th scope="col">how it packs</th></tr></thead>
+        <tbody>
+          <tr><td><strong>short</strong></td><td>under 5 s</td><td>time to first text</td><td>warm model, starts at once, no batch wait</td></tr>
+          <tr><td><strong>medium</strong></td><td>5 to 30 s</td><td>speed</td><td>one pass, batched blocks and beams</td></tr>
+          <tr><td><strong>long</strong></td><td>30 s to one full pass</td><td>speed</td><td>encoder streams blocks, then one large prefill</td></tr>
+          <tr><td><strong>very long</strong></td><td>past one pass</td><td>throughput</td><td>split pieces, wide batch, slots refilled</td></tr>
+          <tr><td><strong>many files</strong></td><td>any mix</td><td>throughput</td><td>similar lengths grouped, widest batch that fits</td></tr>
+          <tr><td><strong>realtime</strong></td><td>live</td><td>lowest latency</td><td>newest audio, settled text prefilled, tail only</td></tr>
+          <tr><td><strong>realtime plus files</strong></td><td>mixed</td><td>lowest latency</td><td>live goes first, files fill the spare slots</td></tr>
+          <tr><td><strong>under load</strong></td><td>hot, battery, busy</td><td>staying smooth</td><td>narrower batch, work waits in the queue</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="ways">
+      <article class="way"><h3>what it reads</h3><p>audio length, queue, deadlines, measured step time, memory pressure, thermal state, power, and chip health.</p></article>
+      <article class="way"><h3>what it changes</h3><p>batch width, which pieces share a call, which chip runs a stage, priority, and how far the encoder works ahead.</p></article>
+      <article class="way"><h3>what it never changes</h3><p>the answer. only exact paths are eligible, at any batch width and any load.</p></article>
+    </div>
+  </section>
+
+<section aria-labelledby="ways">
     <h2 id="ways">six ways to pack</h2>
     <p class="dim">the engine combines these. each one is a bet the hill-climb can keep or drop.</p>
     <div class="ways" id="way-grid"></div>
   </section>
 
-  <section aria-labelledby="tasks">
-    <h2 id="tasks">packing by task</h2>
-    <div class="table-wrap" tabindex="0" role="region" aria-label="packing by task">
-      <table>
-        <thead><tr><th scope="col">task</th><th scope="col">number that wins</th><th scope="col">how it packs</th></tr></thead>
-        <tbody>
-          <tr><td><strong>batch of files</strong></td><td>highest throughput</td><td>mel across cores, pieces decoded in batches, chips overlapped</td></tr>
-          <tr><td><strong>one file</strong></td><td>highest speed</td><td>blocks batched, beams batched, encoder overlaps decoder</td></tr>
-          <tr><td><strong>live</strong></td><td>lowest latency</td><td>newest block only, finished blocks cached, settled text prefilled, only the tail decoded</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
-
   <section aria-labelledby="ceiling">
     <h2 id="ceiling">the decoder's ceiling</h2>
-    <p class="dim">each decoder step reads its weights from memory. at the m4's 120 gb/s, that caps one stream no matter which chip runs it. these are estimates until measured.</p>
+    <p class="dim">the gpu on this mac measured about 91 gb/s of memory reads, below the chip's 120 gb/s spec. this is the fastest a 2-minute clip could decode from weight reads alone.</p>
     <div class="bars panel">
-      <div class="bar-row"><span>16-bit</span><div class="bar" style="width:100%"></div><span>~35 steps/s</span></div>
-      <div class="bar-row"><span>32-bit</span><div class="bar" style="width:49%"></div><span>~17 steps/s</span></div>
+      <div class="bar-row"><span>16-bit, batched</span><div class="bar" style="width:100%"></div><span>~7.8x realtime</span></div>
+      <div class="bar-row"><span>32-bit, batched</span><div class="bar" style="width:50%"></div><span>~3.9x realtime</span></div>
+      <div class="bar-row"><span>16-bit, one by one</span><div class="bar" style="width:33%"></div><span>~2.6x realtime</span></div>
+      <div class="bar-row"><span>32-bit, one by one</span><div class="bar" style="width:17%"></div><span>~1.3x realtime</span></div>
     </div>
-    <p>this is why beams run as one batch. three beams read the weights once per step, so more work fits under the same ceiling.</p>
+    <p>a wide batch does not make one clip faster than this. it lets several clips share the same weight reads, so total throughput rises until compute or cache traffic becomes the limit.</p>
+    <h3 style="margin-top:32px">what to expect</h3>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="estimated speed on this mac"><table><thead><tr><th scope="col">path</th><th scope="col">matches reference</th><th scope="col">estimated speed</th></tr></thead><tbody><tr><td><strong>32-bit, 3 beams</strong></td><td>yes</td><td>~2-3x realtime</td></tr><tr><td><strong>16-bit, 3 beams</strong></td><td>if the golden test passes</td><td>~3-5x realtime</td></tr><tr><td><strong>16-bit, greedy</strong></td><td>only if tokens stay identical</td><td>~5-7x realtime</td></tr><tr><td><strong>16-bit, batch of files</strong></td><td>if the golden test passes</td><td>~5-8x total</td></tr><tr><td><strong>8-bit, greedy</strong></td><td>no, a lower-precision baseline</td><td>~10-15x realtime</td></tr></tbody></table></div>
+    <p class="dim small">estimates for a warm run on this fanless m4 macbook air, at about 3.4 tokens per second of speech. the 8-bit row scales <a href="https://github.com/ljho01/qwen3-asr-opt" target="_blank" rel="noopener noreferrer">a published 33x run on an m4 pro</a> by memory bandwidth. the batch row uses <a href="https://github.com/drguptavivek/qwen3-asr-mlx-runtime" target="_blank" rel="noopener noreferrer">a published 1.5x batching gain</a>. long runs may be slower once the air gets hot.</p>
   </section>
 
   <section aria-labelledby="threads">
@@ -328,7 +352,20 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
     </ol>
   </section>
 
-  <footer>part of the <a href="plan.html">fourier plan</a>.</footer>
+  <section aria-labelledby="order">
+    <h2 id="order">build order</h2>
+    <ol class="rules">
+      <li><strong>measure the ceiling.</strong> a one-layer test on the npu and gpu sets the real memory limit.</li>
+      <li><strong>batch the beams</strong> on one exact 32-bit path.</li>
+      <li><strong>index the beam cache,</strong> so its rows never move.</li>
+      <li><strong>prove 16-bit.</strong> if it passes the golden test, it could roughly double single-clip speed.</li>
+      <li><strong>widen the batch</strong> and refill its slots.</li>
+      <li><strong>move the encoder ahead</strong> onto the other chip.</li>
+      <li><strong>turn on the scheduler,</strong> starting from the sizes above and tuning them with measurements.</li>
+    </ol>
+  </section>
+
+  <footer>part of the <a href="plan.html">fourier plan</a>. set in <a href="https://allo.joshpuckett.me" target="_blank" rel="noopener noreferrer">allo</a>.</footer>
 </main>
 
 <script>
@@ -341,17 +378,18 @@ const groups = [
     ['resample', 'fixed chunks. the cpu takes it across cores if moving data to a chip costs more than the work.', 'race', 'race', 'parallel'],
     ['mel', '128 bins every 10 ms, in batched 1-second windows, then one loudness floor for the clip.', 'race', 'race', 'parallel'],
   ]},
-  { name: 'encode', when: 'once per block', steps: [
+  { name: 'encode', when: 'once per piece, in batched blocks', steps: [
     ['conv front', 'independent 1-second pieces run as one batch, 13 tokens per second.', 'race', 'race', 'backup'],
-    ['encoder', '24 layers on fixed 8-second blocks of 104 tokens with a mask. blocks batch together.', 'race', 'race', 'backup'],
+    ['encoder', '24 layers on fixed 8-second blocks of 104 tokens with a mask. blocks batch together and run ahead of the decoder.', 'race', 'race', 'backup'],
     ['projector', 'in the same graph as the encoder, so no data moves between them.', 'race', 'race', 'backup'],
+    ['audio prefill', 'the decoder reads the prompt and all audio tokens once, then every beam shares that cache.', 'race', 'race', 'backup'],
   ]},
   { name: 'decode', when: 'repeats for every token, up to 512', steps: [
-    ['token lookup', 'inside the decoder graph. audio tokens are spliced in once, then cached.', 'race', 'race', 'backup'],
-    ['decoder', '28 layers, whole on one chip. 3 beams run as one batch over one shared audio cache. the npu can run it as sequential pieces.', 'race', 'race', 'backup'],
+    ['token lookup', 'inside the decoder graph, for the newest token of each beam.', 'race', 'race', 'backup'],
+    ['decoder', '28 layers, whole on the fastest chip. all beams and pieces run as one wide batch, so each step reads the weights once.', 'race', 'race', 'backup'],
     ['output head', 'on the same chip as the decoder.', 'race', 'race', 'backup'],
     ['token bans and top-k', 'fixed bans are masked on the chip, and only the best scores come back, with extras to survive the repeat ban.', 'race', 'race', 'backup'],
-    ['beam search', 'repeat bans and scoring run across beams, then the chip is told how to reorder its cache.', '-', '-', 'parallel'],
+    ['beam search', 'repeat bans and scoring run across beams, then a small index table is updated so cache rows never move.', '-', '-', 'parallel'],
   ]},
   { name: 'finish', when: 'once per clip', steps: [
     ['tokenizer and text', 'turns tokens into text and joins the pieces of long files.', '-', '-', 'run'],
@@ -380,94 +418,108 @@ document.getElementById('step-rows').innerHTML = groups.map(g => `
   ${g.steps.map(s => `<tr><th scope="row"><span class="num">${++number}</span><strong>${s[0]}</strong><small>${s[1]}</small></th><td class="chipcell">${mark(s[2], 'n')}</td><td class="chipcell">${mark(s[3], 'g')}</td><td class="chipcell">${mark(s[4], 'c')}</td></tr>`).join('')}`).join('');
 
 const ROW = 24;
-const laneDefs = [['npu', 0, 3], ['gpu', 4, 3], ['cpu', 8, 3], ['main', 12, 1]];
-const lanes = document.getElementById('lanes');
-const labels = document.getElementById('lane-labels');
-laneDefs.forEach(([name, top, rows]) => {
-  const lane = document.createElement('div');
-  lane.className = 'lane' + (name === 'main' ? ' free' : '');
-  lane.style.top = `${top * ROW}px`;
-  lane.style.height = `${rows * ROW}px`;
-  if (name === 'main') lane.textContent = 'free, only drawing';
-  lanes.append(lane);
-  const label = document.createElement('span');
-  label.textContent = name;
-  label.style.top = `${top * ROW}px`;
-  label.style.height = `${rows * ROW}px`;
-  labels.append(label);
-});
-
-const ids = ['m1','e1','d1','b1','m2','e2','d2','b2','m3','e3','d3','b3'];
-const tiles = Object.fromEntries(ids.map(id => {
-  const el = document.createElement('div');
-  el.className = 'tile';
-  el.innerHTML = `<i>${id}</i>`;
-  lanes.append(el);
-  return [id, el];
-}));
-
-const packs = [
-  { name: 'one by one', note: 'the baseline. every block finishes before the next one starts, and most chips sit idle.', at: {
-    m1:[0,4], e1:[1,4], d1:[2,4], b1:[3,8], m2:[4,4], e2:[5,4], d2:[6,4], b2:[7,8], m3:[8,4], e3:[9,4], d3:[10,4], b3:[11,8] }},
-  { name: 'split chips', note: 'each stage runs on its best chip, for example npu encoder and gpu decoder. the order is unchanged.', at: {
-    m1:[0,4], e1:[1,0], d1:[2,4], b1:[3,8], m2:[4,4], e2:[5,0], d2:[6,4], b2:[7,8], m3:[8,4], e3:[9,0], d3:[10,4], b3:[11,8] }},
-  { name: 'overlap', note: 'mel runs across cpu cores, and one chip encodes the next block while another decodes the current one.', at: {
-    m1:[0,8], m2:[0,9], m3:[0,10], e1:[1,0], e2:[2,0], e3:[3,0], d1:[2,4], d2:[3,4], d3:[4,4], b1:[3,8], b2:[4,8], b3:[5,8] }},
-  { name: 'batched', note: 'blocks go through each chip together. the most compact shape, as long as memory bandwidth and the golden test allow it.', at: {
-    m1:[0,8], m2:[0,9], m3:[0,10], e1:[1,0], e2:[1,1], e3:[1,2], d1:[2,4], d2:[2,5], d3:[2,6], b1:[3,8], b2:[3,9], b3:[3,10] }},
+const laneDefs = [['npu', 0, 3], ['gpu', 4, 6], ['cpu', 11, 3], ['main', 15, 1]];
+const T = (label, col, rows) => rows.map(row => [label, col, row]);
+const NPU = [0, 1, 2], X = [4, 5, 6], Y = [7, 8, 9], CPU = [11, 12, 13];
+const cycle = (from, to, draw) => {
+  const out = [];
+  for (let col = from, step = 1; col <= to; col += 2, step++) {
+    out.push(...draw(step, col));
+    if (col + 1 <= to) out.push(...T(`b${step}`, col + 1, CPU));
+  }
+  return out;
+};
+const both = (step, col) => [...T(`x${step}`, col, X), ...T(`y${step}`, col, Y)];
+const start = [...T('m', 0, [11, 12]), ...T('ex', 1, [0]), ...T('ey', 1, [1]), ...T('px', 2, X), ...T('py', 2, Y)];
+const beams = [...T('m', 0, CPU), ...T('e', 1, NPU), ...T('p', 2, X), ...cycle(3, 11, (s, c) => T(`d${s}`, c, X))];
+const combinedTiles = [
+  ...start,
+  ...T('mz', 3, [11]), ...both(1, 3), ...T('b1', 4, CPU),
+  ...T('ez', 5, [0]), ...both(2, 5), ...T('b2', 6, CPU),
+  ...T('pz', 7, X), ...T('y3', 7, Y), ...T('b3', 8, CPU),
+  ...T('z1', 9, X), ...T('y4', 9, Y), ...T('b4', 10, CPU),
+  ...T('z2', 11, X), ...T('y5', 11, Y),
 ];
 
-const sw = document.getElementById('switch');
-const note = document.getElementById('note');
-const buttons = packs.map((pack, index) => {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.textContent = pack.name;
-  button.addEventListener('click', () => show(index));
-  sw.append(button);
-  return button;
-});
-function show(index) {
-  const pack = packs[index];
-  buttons.forEach((b, i) => b.setAttribute('aria-pressed', String(i === index)));
-  note.textContent = pack.note;
-  for (const id of ids) {
-    const [col, row] = pack.at[id];
-    tiles[id].style.transform = `translate(${col * 100}%, ${row * ROW}px)`;
-    tiles[id].className = `tile on-${row < 3 ? 'n' : row < 7 ? 'g' : 'c'}`;
-  }
-}
-show(2);
+const buildPacks = [
+  { name: 'one at a time', note: 'the baseline. each beam reads all the decoder weights on its own, so memory is the wall.', tiles: [
+    ...T('m', 0, [11]), ...T('e', 1, [4]), ...T('p', 2, [4]),
+    ...T('d1', 3, [4]), ...T('d1', 4, [4]), ...T('d1', 5, [4]), ...T('b1', 6, [11]),
+    ...T('d2', 7, [4]), ...T('d2', 8, [4]), ...T('d2', 9, [4]), ...T('b2', 10, [11]), ...T('d3', 11, [4]),
+  ]},
+  { name: 'batched beams', note: 'three beams share every weight read. the encoder finishes first, because the decoder needs all the audio tokens.', tiles: beams },
+  { name: 'wide batch', note: 'pieces x and y decode in the same call, so one weight read does the work of both.', tiles: [...start, ...cycle(3, 11, both)] },
+  { name: 'combined', note: 'the target. when x ends, z takes its slot at once, and the encoder has already prepared z on the other chip.', tiles: combinedTiles },
+];
 
-const combined = document.getElementById('combined-lanes');
-const combinedLabels = document.getElementById('combined-labels');
-laneDefs.forEach(([name, top, rows]) => {
-  const lane = document.createElement('div');
-  lane.className = 'lane' + (name === 'main' ? ' free' : '');
-  lane.style.top = `${top * ROW}px`;
-  lane.style.height = `${rows * ROW}px`;
-  if (name === 'main') lane.textContent = 'free, only drawing';
-  combined.append(lane);
-  const label = document.createElement('span');
-  label.textContent = name;
-  label.style.top = `${top * ROW}px`;
-  label.style.height = `${rows * ROW}px`;
-  combinedLabels.append(label);
-});
-const place = (text, col, row) => {
-  const el = document.createElement('div');
-  el.className = `tile static on-${row < 3 ? 'n' : row < 7 ? 'g' : 'c'}`;
-  el.style.transform = `translate(${col * 100}%, ${row * ROW}px)`;
-  el.innerHTML = `<i>${text}</i>`;
-  combined.append(el);
-};
-for (let batch = 0; batch < 9; batch++) {
-  const n = batch + 1;
-  place(`m${n}`, batch, 8);
-  [0, 1, 2].forEach(row => place(`e${n}`, batch + 1, row));
-  [4, 5, 6].forEach(row => place(`d${n}`, batch + 2, row));
-  [9, 10].forEach(row => place(`b${n}`, batch + 3, row));
+const workloadPacks = [
+  { name: 'short', note: 'starts at once on a warm model. it never waits to fill a batch, because first text is what matters.', tiles: [
+    ...T('m', 0, [11]), ...T('e', 1, [0]), ...T('p', 2, X), ...cycle(3, 7, (s, c) => T(`d${s}`, c, X)),
+  ]},
+  { name: 'medium', note: 'one exact pass. mel across cores, encoder blocks in one batch, beams in one batch.', tiles: beams },
+  { name: 'long', note: 'still one exact pass. more blocks stream through the encoder before one large prefill.', tiles: [
+    ...T('m', 0, CPU), ...T('m', 1, CPU), ...T('e', 1, NPU), ...T('e', 2, NPU), ...T('p', 3, X), ...cycle(4, 11, (s, c) => T(`d${s}`, c, X)),
+  ]},
+  { name: 'very long', note: 'too long for one pass, so it is split. pieces flow through one wide batch and refill its slots.', tiles: combinedTiles },
+  { name: 'realtime', note: 'only the newest audio and the unsettled tail (t). small, top-priority calls that never wait for a batch.', tiles: [0, 4, 8].flatMap(c => [
+    ...T('m', c, [11]), ...T('e', c + 1, [0]), ...T('t', c + 2, [4]), ...T('b', c + 3, [11]),
+  ])},
+  { name: 'under load', note: 'the machine got busy or hot, so the batch narrows and y waits in the queue. the answer does not change.', tiles: [
+    ...start, ...cycle(3, 11, (s, c) => s <= 2 ? both(s, c) : T(`x${s}`, c, X)),
+  ]},
+];
+
+function createPacker({ switchId, noteId, lanesId, labelsId, packs, first }) {
+  const lanes = document.getElementById(lanesId);
+  const labels = document.getElementById(labelsId);
+  const sw = document.getElementById(switchId);
+  const note = document.getElementById(noteId);
+  laneDefs.forEach(([name, top, rows]) => {
+    const lane = document.createElement('div');
+    lane.className = 'lane' + (name === 'main' ? ' free' : '');
+    lane.style.top = `${top * ROW}px`;
+    lane.style.height = `${rows * ROW}px`;
+    if (name === 'main') lane.textContent = 'free, only drawing';
+    lanes.append(lane);
+    const label = document.createElement('span');
+    label.textContent = name;
+    label.style.top = `${top * ROW}px`;
+    label.style.height = `${rows * ROW}px`;
+    labels.append(label);
+  });
+  const count = Math.max(...packs.map(p => p.tiles.length));
+  const pool = Array.from({ length: count }, () => {
+    const el = document.createElement('div');
+    el.className = 'tile hidden';
+    el.innerHTML = '<i></i>';
+    lanes.append(el);
+    return el;
+  });
+  const show = index => {
+    const pack = packs[index];
+    buttons.forEach((b, i) => b.setAttribute('aria-pressed', String(i === index)));
+    note.textContent = pack.note;
+    pool.forEach((el, i) => {
+      const tile = pack.tiles[i];
+      if (!tile) { el.classList.add('hidden'); return; }
+      const [text, col, row] = tile;
+      el.firstChild.textContent = text;
+      el.style.transform = `translate(${col * 100}%, ${row * ROW}px)`;
+      el.className = `tile on-${row < 3 ? 'n' : row < 10 ? 'g' : 'c'}`;
+    });
+  };
+  const buttons = packs.map((pack, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = pack.name;
+    button.addEventListener('click', () => show(index));
+    sw.append(button);
+    return button;
+  });
+  show(first);
 }
+createPacker({ switchId: 'switch', noteId: 'note', lanesId: 'lanes', labelsId: 'lane-labels', packs: buildPacks, first: 3 });
+createPacker({ switchId: 'load-switch', noteId: 'load-note', lanesId: 'load-lanes', labelsId: 'load-labels', packs: workloadPacks, first: 0 });
 
 const way = (name, text, cells) => {
   const map = {};
@@ -480,10 +532,10 @@ const fill = (xs, ys, c) => xs.flatMap(x => ys.map(y => [x, y, c]));
 document.getElementById('way-grid').innerHTML = [
   way('across time', 'cut audio into fixed blocks that run together. used by the conv front and encoder.', fill([0,1,2,3,4,5,6,7], [1], 'n')),
   way('across beams', 'three beams run as one batch and share one audio cache. used by the decoder.', fill([0,1,2,3,4,5,6,7], [0,1,2], 'g')),
-  way('across pieces', 'pieces of a long file decode together for throughput.', [...fill([0,1,2], [0], 'g'), ...fill([0,1,2,3,4], [1], 'g'), ...fill([0,1,2,3], [2], 'g')]),
-  way('across chips', 'one chip encodes the next block while another decodes this one.', [...fill([0,1,2,3,4], [0], 'n'), ...fill([2,3,4,5,6,7], [2], 'g')]),
+  way('across pieces', 'pieces decode in one call, and a finished piece hands its slot to the next.', [...fill([0,1,2], [0], 'g'), ...fill([0,1,2,3,4], [1], 'g'), ...fill([0,1,2,3], [2], 'g')]),
+  way('across chips', 'one chip prepares the next piece while another decodes. this helps across pieces, not inside one clip.', [...fill([0,1,2,3,4], [0], 'n'), ...fill([2,3,4,5,6,7], [2], 'g')]),
   way('across cores', 'the cpu takes parallel work: file decode, mel when it wins, beam bookkeeping.', fill([0,1,2], [0,1,2], 'c')),
-  way('across memory', 'chips read the same memory, so weights, cache and audio tokens are not copied.', [...fill([0,1,2,3,4,5,6,7], [0], 'n'), ...fill([0,1,2,3,4,5,6,7], [1], 'c'), ...fill([0,1,2,3,4,5,6,7], [2], 'g')]),
+  way('across memory', 'chips share weights and audio tokens without copies, and beam cache rows stay in place.', [...fill([0,1,2,3,4,5,6,7], [0], 'n'), ...fill([0,1,2,3,4,5,6,7], [1], 'c'), ...fill([0,1,2,3,4,5,6,7], [2], 'g')]),
 ].join('');
 </script>
 </body>
