@@ -106,7 +106,7 @@ public struct FourierLiveView<Accessory: View>: View {
             }
             // short text sits at the top; once it overflows, new lines keep the newest words in view
             .defaultScrollAnchor(.top, for: .alignment)
-            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .fourierFollowsNewest()
             .scrollIndicators(.automatic)
             .fourierScrollEdges()
         }
