@@ -117,26 +117,35 @@ private struct CompactScreen: View {
                     Button("settings", systemImage: "gearshape") { app.showSettings = true }
                 }
             }
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                // the empty screen has its own choose button; this one is for the next file, or to cancel
-                if item == .mode(.transcribe), app.hasBeenReady, app.transcribe.isRunning || app.transcribe.transcript != nil {
-                    Button(app.toggleTitle, systemImage: app.transcribe.isRunning ? "xmark" : "folder") { app.toggleCurrent() }
+            // one item with its own row, so the icons sit closer than the system spaces separate items
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 0) {
+                    // the empty screen has its own choose button; this one is for the next file, or to cancel
+                    if item == .mode(.transcribe), app.hasBeenReady, app.transcribe.isRunning || app.transcribe.transcript != nil {
+                        Button(app.toggleTitle, systemImage: app.transcribe.isRunning ? "xmark" : "folder") { app.toggleCurrent() }
+                            .frame(width: 38, height: 36)
+                    }
+                    Menu("transcript", systemImage: "square.and.arrow.up") {
+                        Button("copy", systemImage: "doc.on.doc") {
+                            if let text = app.currentText { Pasteboard.copy(text) }
+                        }
+                        Button("share…", systemImage: "square.and.arrow.up") {
+                            if let text = app.currentText { SharePicker.show(text) }
+                        }
+                        Button("export as text…", systemImage: "arrow.down.document") {
+                            exportText = app.currentText ?? ""
+                            exporting = true
+                        }
+                    }
+                    .disabled(!app.hasText)
+                    .frame(width: 38, height: 36)
+                    Button("code", systemImage: "chevron.left.forwardslash.chevron.right") { app.showCode = true }
+                        .frame(width: 38, height: 36)
+                    Button("live stats", systemImage: "chart.xyaxis.line") { app.showStats = true }
+                        .frame(width: 38, height: 36)
                 }
-                Menu("transcript", systemImage: "square.and.arrow.up") {
-                    Button("copy", systemImage: "doc.on.doc") {
-                        if let text = app.currentText { Pasteboard.copy(text) }
-                    }
-                    Button("share…", systemImage: "square.and.arrow.up") {
-                        if let text = app.currentText { SharePicker.show(text) }
-                    }
-                    Button("export as text…", systemImage: "arrow.down.document") {
-                        exportText = app.currentText ?? ""
-                        exporting = true
-                    }
-                }
-                .disabled(!app.hasText)
-                Button("code", systemImage: "chevron.left.forwardslash.chevron.right") { app.showCode = true }
-                Button("live stats", systemImage: "chart.xyaxis.line") { app.showStats = true }
+                .labelStyle(.iconOnly)
+                .padding(.horizontal, 2)
             }
         }
         .fileExporter(isPresented: $exporting, document: TextFile(text: exportText), contentType: .plainText,

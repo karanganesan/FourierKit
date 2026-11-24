@@ -46,7 +46,7 @@ what this does not claim:
 add the package by its url in xcode (file, add package dependencies), or in `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/karanganesan/FourierKit.git", from: "0.0.3")
+.package(url: "https://github.com/karanganesan/FourierKit.git", from: "0.0.4")
 ```
 
 then add the `FourierKit` product to your target, and `FourierKitUI` if you want the default views.

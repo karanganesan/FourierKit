@@ -1,5 +1,10 @@
 # changelog
 
+## 0.0.4
+
+- the playground's toolbar icons on iphone sit closer together.
+- `scripts/archive.sh` no longer fails at the upload step.
+
 ## 0.0.3
 
 ### fixes

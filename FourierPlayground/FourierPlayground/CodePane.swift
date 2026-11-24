@@ -14,7 +14,7 @@ enum CodeSnippets {
         // Package.swift
         dependencies: [
             // pin a tag for production once one includes these calls
-            .package(url: "\(packageURL)", from: "0.0.3"),
+            .package(url: "\(packageURL)", from: "0.0.4"),
         ],
         targets: [
             .target(name: "YourApp", dependencies: [
