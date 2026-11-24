@@ -5,6 +5,9 @@ import Foundation
 /// safe to call from the main actor. every heavy call is async and leaves the caller's actor at once;
 /// streams are produced off the main actor and coalesced to at most one value per frame.
 public final class Fourier: Sendable {
+    /// the sdk's version. the package itself is versioned by its git tag, which matches this.
+    public static let version = "0.0.1"
+
     public let options: FourierOptions
     private let runtime = Runtime.shared
 

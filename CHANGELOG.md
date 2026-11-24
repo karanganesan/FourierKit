@@ -1,6 +1,6 @@
 # changelog
 
-## 0.1.0 (unreleased)
+## 0.0.1 (unreleased)
 
 nothing is released yet. this is what exists in the repo.
 
