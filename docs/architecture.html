@@ -229,13 +229,13 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
 
   <section aria-labelledby="path">
     <h2 id="path">the whole path</h2>
-    <p class="dim">npu and gpu race for every step they can run. the cpu takes parallel work and logic. the main thread only draws.</p>
+    <p class="dim">the decoder starts on the gpu, npu and gpu race for the encoder, and the cpu runs small audio stages, parallel work and logic. the main thread only draws.</p>
     <div class="flow" id="flow"></div>
   </section>
 
   <section aria-labelledby="steps">
     <h2 id="steps">every step</h2>
-    <p class="dim"><strong>race</strong> means both chips get built and the faster exact one keeps the step. <strong>parallel</strong> means the cpu splits it across cores. <strong>backup</strong> runs only if the others fail the golden test.</p>
+    <p class="dim"><strong>first</strong> is built first. <strong>race</strong> means both chips get built and the faster exact one keeps the step. <strong>test</strong> is checked in the one-layer benchmark before any full build. <strong>parallel</strong> means the cpu splits it across cores. <strong>backup</strong> runs only if the others fail the golden test.</p>
     <div class="table-wrap" tabindex="0" role="region" aria-label="every inference step by chip">
       <table class="steps">
         <thead><tr><th scope="col">step and how it is packed</th><th scope="col" class="chipcell">npu</th><th scope="col" class="chipcell">gpu</th><th scope="col" class="chipcell">cpu</th></tr></thead>
@@ -266,6 +266,7 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
     <p class="dim small">the decoder is drawn on the gpu and the encoder on the npu as an example. the race decides which chip gets which.</p>
     <h3 style="margin-top:32px">how calls get packed</h3>
     <ol class="rules">
+      <li><strong>store 16-bit, compute 32-bit.</strong> weights are read at half the memory cost, and the math keeps full precision.</li>
       <li><strong>one wide decoder batch.</strong> beams and pieces share each weight read.</li>
       <li><strong>refill slots at once.</strong> when a piece ends, the next one takes its slot without draining the batch.</li>
       <li><strong>encoder works ahead.</strong> the other chip prepares the next piece, so the batch never waits for audio.</li>
@@ -292,9 +293,9 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
           <tr><td><strong>short</strong></td><td>under 5 s</td><td>time to first text</td><td>warm model, starts at once, no batch wait</td></tr>
           <tr><td><strong>medium</strong></td><td>5 to 30 s</td><td>speed</td><td>one pass, batched blocks and beams</td></tr>
           <tr><td><strong>long</strong></td><td>30 s to one full pass</td><td>speed</td><td>encoder streams blocks, then one large prefill</td></tr>
-          <tr><td><strong>very long</strong></td><td>past one pass</td><td>throughput</td><td>split pieces, wide batch, slots refilled</td></tr>
+          <tr><td><strong>very long</strong></td><td>past one pass</td><td>throughput</td><td>shorter split pieces, wide batch, slots refilled</td></tr>
           <tr><td><strong>many files</strong></td><td>any mix</td><td>throughput</td><td>similar lengths grouped, widest batch that fits</td></tr>
-          <tr><td><strong>realtime</strong></td><td>live</td><td>lowest latency</td><td>newest audio, settled text prefilled, tail only</td></tr>
+          <tr><td><strong>realtime</strong></td><td>live</td><td>lowest latency</td><td>newest audio, tail only, update rate follows measured speed</td></tr>
           <tr><td><strong>realtime plus files</strong></td><td>mixed</td><td>lowest latency</td><td>live goes first, files fill the spare slots</td></tr>
           <tr><td><strong>under load</strong></td><td>hot, battery, busy</td><td>staying smooth</td><td>narrower batch, work waits in the queue</td></tr>
         </tbody>
@@ -307,7 +308,13 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
     </div>
   </section>
 
-<section aria-labelledby="ways">
+<section aria-labelledby="realtime">
+    <h2 id="realtime">the realtime path</h2>
+    <p class="dim">everything before the model, on by default for live audio. the microphone is open only while listening, and files skip this path.</p>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="realtime path"><table><thead><tr><th scope="col">step</th><th scope="col">where</th><th scope="col">what it does</th></tr></thead><tbody><tr><td><strong>permission</strong></td><td>first listen</td><td>asks once, only when the microphone is needed</td></tr><tr><td><strong>voice processing</strong></td><td>audio system</td><td>noise suppression, echo cancellation and gain</td></tr><tr><td><strong>ring buffer</strong></td><td>audio thread</td><td>copies samples with no locks or waiting</td></tr><tr><td><strong>pre-roll</strong></td><td>ring buffer</td><td>keeps 500 ms so first words are not clipped</td></tr><tr><td><strong>speech detection</strong></td><td>cpu</td><td>fast energy gate, confirmed by a speech classifier</td></tr><tr><td><strong>warm engine</strong></td><td>npu and gpu</td><td>already loaded, so the first call starts at once</td></tr><tr><td><strong>state</strong></td><td>background</td><td>one update per frame, delivered off the main actor</td></tr></tbody></table></div>
+  </section>
+
+  <section aria-labelledby="ways">
     <h2 id="ways">six ways to pack</h2>
     <p class="dim">the engine combines these. each one is a bet the hill-climb can keep or drop.</p>
     <div class="ways" id="way-grid"></div>
@@ -315,17 +322,17 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
 
   <section aria-labelledby="ceiling">
     <h2 id="ceiling">the decoder's ceiling</h2>
-    <p class="dim">the gpu on this mac measured about 91 gb/s of memory reads, below the chip's 120 gb/s spec. this is the fastest a 2-minute clip could decode from weight reads alone.</p>
+    <p class="dim">the gpu on this mac measured about 91 gb/s of memory reads, below the chip's 120 gb/s spec. this is the fastest a 2-minute clip could decode from weight reads alone. the cost depends on how weights are stored, so 32-bit math can still run at the 16-bit ceiling.</p>
     <div class="bars panel">
-      <div class="bar-row"><span>16-bit, batched</span><div class="bar" style="width:100%"></div><span>~7.8x realtime</span></div>
-      <div class="bar-row"><span>32-bit, batched</span><div class="bar" style="width:50%"></div><span>~3.9x realtime</span></div>
-      <div class="bar-row"><span>16-bit, one by one</span><div class="bar" style="width:33%"></div><span>~2.6x realtime</span></div>
-      <div class="bar-row"><span>32-bit, one by one</span><div class="bar" style="width:17%"></div><span>~1.3x realtime</span></div>
+      <div class="bar-row"><span>16-bit weights, batched</span><div class="bar" style="width:100%"></div><span>~7.8x realtime</span></div>
+      <div class="bar-row"><span>32-bit weights, batched</span><div class="bar" style="width:50%"></div><span>~3.9x realtime</span></div>
+      <div class="bar-row"><span>16-bit weights, one by one</span><div class="bar" style="width:33%"></div><span>~2.6x realtime</span></div>
+      <div class="bar-row"><span>32-bit weights, one by one</span><div class="bar" style="width:17%"></div><span>~1.3x realtime</span></div>
     </div>
     <p>a wide batch does not make one clip faster than this. it lets several clips share the same weight reads, so total throughput rises until compute or cache traffic becomes the limit.</p>
+    <p>the cache adds about 115 kb per context token, or about 0.23 gb per step for a 2-minute piece. this is why long audio prefers shorter pieces.</p>
     <h3 style="margin-top:32px">what to expect</h3>
-    <div class="table-wrap" tabindex="0" role="region" aria-label="estimated speed on this mac"><table><thead><tr><th scope="col">path</th><th scope="col">matches reference</th><th scope="col">estimated speed</th></tr></thead><tbody><tr><td><strong>32-bit, 3 beams</strong></td><td>yes</td><td>~2-3x realtime</td></tr><tr><td><strong>16-bit, 3 beams</strong></td><td>if the golden test passes</td><td>~3-5x realtime</td></tr><tr><td><strong>16-bit, greedy</strong></td><td>only if tokens stay identical</td><td>~5-7x realtime</td></tr><tr><td><strong>16-bit, batch of files</strong></td><td>if the golden test passes</td><td>~5-8x total</td></tr><tr><td><strong>8-bit, greedy</strong></td><td>no, a lower-precision baseline</td><td>~10-15x realtime</td></tr></tbody></table></div>
-    <p class="dim small">estimates for a warm run on this fanless m4 macbook air, at about 3.4 tokens per second of speech. the 8-bit row scales <a href="https://github.com/ljho01/qwen3-asr-opt" target="_blank" rel="noopener noreferrer">a published 33x run on an m4 pro</a> by memory bandwidth. the batch row uses <a href="https://github.com/drguptavivek/qwen3-asr-mlx-runtime" target="_blank" rel="noopener noreferrer">a published 1.5x batching gain</a>. long runs may be slower once the air gets hot.</p>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="estimated speed on this mac"><table><thead><tr><th scope="col">path</th><th scope="col">matches reference</th><th scope="col">estimated speed</th></tr></thead><tbody><tr><td><strong>16-bit weights, 32-bit math, 3 beams</strong></td><td>expected, golden test decides</td><td>~4-6x realtime</td></tr><tr><td><strong>16-bit weights and math, 3 beams</strong></td><td>only if margin and golden test pass</td><td>~4-6x realtime</td></tr><tr><td><strong>32-bit weights and math, 3 beams</strong></td><td>yes, the fallback</td><td>~3x realtime</td></tr><tr><td><strong>batch of files, exact path</strong></td><td>golden test decides</td><td>~12-20x total</td></tr><tr><td><strong>8-bit, greedy</strong></td><td>no, a lower-precision baseline</td><td>~10-15x realtime</td></tr></tbody></table></div><p class="dim small">estimates for a warm run on this fanless m4 macbook air, at about 3.4 tokens per second of speech. the 8-bit row scales <a href="https://github.com/ljho01/qwen3-asr-opt" target="_blank" rel="noopener noreferrer">a published 33x run on an m4 pro</a> by memory bandwidth. the batch row is the least certain, because it depends on gpu compute and cache traffic. long runs may be slower once the air gets hot.</p>
   </section>
 
   <section aria-labelledby="threads">
@@ -355,12 +362,12 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
   <section aria-labelledby="order">
     <h2 id="order">build order</h2>
     <ol class="rules">
-      <li><strong>measure the ceiling.</strong> a one-layer test on the npu and gpu sets the real memory limit.</li>
-      <li><strong>batch the beams</strong> on one exact 32-bit path.</li>
+      <li><strong>run the one-layer benchmark.</strong> it measures the real ceiling across chips, batch width, context length and prefill.</li>
+      <li><strong>build the exact path:</strong> batched beams with 16-bit weights and 32-bit math.</li>
       <li><strong>index the beam cache,</strong> so its rows never move.</li>
-      <li><strong>prove 16-bit.</strong> if it passes the golden test, it could roughly double single-clip speed.</li>
       <li><strong>widen the batch</strong> and refill its slots.</li>
-      <li><strong>move the encoder ahead</strong> onto the other chip.</li>
+      <li><strong>race the encoder</strong> on the npu and gpu, then move it ahead.</li>
+      <li><strong>test pure 16-bit math.</strong> it stays only if it passes the golden test and the safety margin.</li>
       <li><strong>turn on the scheduler,</strong> starting from the sizes above and tuning them with measurements.</li>
     </ol>
   </section>
@@ -375,20 +382,20 @@ const loop = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke
 const groups = [
   { name: 'prepare audio', when: 'once per clip', steps: [
     ['file decode', 'one file per core. it is parsing, so it stays on the cpu.', '-', '-', 'run'],
-    ['resample', 'fixed chunks. the cpu takes it across cores if moving data to a chip costs more than the work.', 'race', 'race', 'parallel'],
-    ['mel', '128 bins every 10 ms, in batched 1-second windows, then one loudness floor for the clip.', 'race', 'race', 'parallel'],
+    ['resample', 'fixed chunks in 32-bit across cores. the work is too small to be worth moving.', '-', '-', 'parallel'],
+    ['mel', '128 bins every 10 ms in 32-bit across cores, then one loudness floor for the clip.', '-', '-', 'parallel'],
   ]},
   { name: 'encode', when: 'once per piece, in batched blocks', steps: [
     ['conv front', 'independent 1-second pieces run as one batch, 13 tokens per second.', 'race', 'race', 'backup'],
     ['encoder', '24 layers on fixed 8-second blocks of 104 tokens with a mask. blocks batch together and run ahead of the decoder.', 'race', 'race', 'backup'],
     ['projector', 'in the same graph as the encoder, so no data moves between them.', 'race', 'race', 'backup'],
-    ['audio prefill', 'the decoder reads the prompt and all audio tokens once, then every beam shares that cache.', 'race', 'race', 'backup'],
+    ['audio prefill', 'the decoder reads the prompt and all audio tokens once, then every beam shares that cache.', 'test', 'first', 'test'],
   ]},
   { name: 'decode', when: 'repeats for every token, up to 512', steps: [
-    ['token lookup', 'inside the decoder graph, for the newest token of each beam.', 'race', 'race', 'backup'],
-    ['decoder', '28 layers, whole on the fastest chip. all beams and pieces run as one wide batch, so each step reads the weights once.', 'race', 'race', 'backup'],
-    ['output head', 'on the same chip as the decoder.', 'race', 'race', 'backup'],
-    ['token bans and top-k', 'fixed bans are masked on the chip, and only the best scores come back, with extras to survive the repeat ban.', 'race', 'race', 'backup'],
+    ['token lookup', 'inside the decoder graph, for the newest token of each beam.', 'test', 'first', 'test'],
+    ['decoder', '28 layers on one chip, with 16-bit weights and 32-bit math. all beams and pieces run as one wide batch, so each step reads the weights once.', 'test', 'first', 'test'],
+    ['output head', 'on the same chip as the decoder, sharing weights with the token table.', 'test', 'first', 'test'],
+    ['token bans and top-k', 'fixed bans are masked on the chip, and only the best scores come back, with extras to survive the repeat ban.', 'test', 'first', 'test'],
     ['beam search', 'repeat bans and scoring run across beams, then a small index table is updated so cache rows never move.', '-', '-', 'parallel'],
   ]},
   { name: 'finish', when: 'once per clip', steps: [
@@ -396,7 +403,7 @@ const groups = [
   ]},
 ];
 
-const dots = (n, g, c) => `<b aria-hidden="true"><i class="${n === 'race' ? 'n' : 'x'}"></i><i class="${g === 'race' ? 'g' : 'x'}"></i><i class="${c === 'run' || c === 'parallel' ? 'c' : 'x'}"></i></b>`;
+const dots = (n, g, c) => `<b aria-hidden="true"><i class="${n === 'race' ? 'n' : 'x'}"></i><i class="${g === 'race' || g === 'first' ? 'g' : 'x'}"></i><i class="${c === 'run' || c === 'parallel' ? 'c' : 'x'}"></i></b>`;
 const flow = document.getElementById('flow');
 flow.innerHTML = groups.map((g, i) => `
   <div class="flow-group">
@@ -407,6 +414,8 @@ flow.innerHTML = groups.map((g, i) => `
 
 const mark = (value, chip) => {
   if (value === 'race') return `<span class="mark race-${chip}">race</span>`;
+  if (value === 'first') return `<span class="mark race-${chip}">first</span>`;
+  if (value === 'test') return '<span class="back">test</span>';
   if (value === 'run') return '<span class="mark run-c">runs it</span>';
   if (value === 'parallel') return '<span class="mark run-c">parallel</span>';
   if (value === 'backup') return '<span class="back">backup</span>';
