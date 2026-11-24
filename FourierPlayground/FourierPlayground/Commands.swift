@@ -11,17 +11,17 @@ struct PlaygroundCommands: Commands {
     var body: some Commands {
         // app menu
         CommandGroup(replacing: .appInfo) {
-            Button("about fourier playground") { NSApp.orderFrontStandardAboutPanel(nil) }
+            Button("about fourierkit") { NSApp.orderFrontStandardAboutPanel(nil) }
         }
         CommandGroup(replacing: .appVisibility) {
-            Button("hide fourier playground") { NSApp.hide(nil) }
+            Button("hide fourierkit") { NSApp.hide(nil) }
                 .keyboardShortcut("h")
             Button("hide others") { NSApp.hideOtherApplications(nil) }
                 .keyboardShortcut("h", modifiers: [.command, .option])
             Button("show all") { NSApp.unhideAllApplications(nil) }
         }
         CommandGroup(replacing: .appTermination) {
-            Button("quit fourier playground") { NSApp.terminate(nil) }
+            Button("quit fourierkit") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")
         }
 

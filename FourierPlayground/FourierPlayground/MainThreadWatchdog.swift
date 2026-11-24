@@ -12,7 +12,7 @@ final class MainThreadWatchdog: @unchecked Sendable {
     static let shared = MainThreadWatchdog()
 
     private let threshold = 0.008
-    private let logger = Logger(subsystem: "com.karanganesan.FourierPlayground", category: "watchdog")
+    private let logger = Logger(subsystem: "com.karanganesan.fourierkit", category: "watchdog")
     // touched only on the main thread
     private var observer: CFRunLoopObserver?
     private var wokeAt: Double?

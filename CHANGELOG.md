@@ -1,6 +1,6 @@
 # changelog
 
-## unreleased
+## 0.0.3
 
 ### fixes
 
@@ -27,6 +27,7 @@
 - `fourierFollowsNewest()` in `FourierKitUI` keeps the end of a scroll view in view while text streams in, and lets go when the reader scrolls up. live text in the playground follows the newest words.
 - the sdk and the playground build for ios and ipados as well as macos. every limit is derived from the device at load: cache slots, batch rows, the encoder's conv group, scratch memory and the piece length for long audio.
 - the playground: deleted transcripts go to recently deleted for 30 days and can be restored. a stop bar follows a running capture on every other screen. after a failed transcription of a recording, the audio is kept and can be retried or saved. automated launches (any `-fourier` argument) use their own recents file. in full screen the toolbar steps aside. the modes are listed as listen, record, transcribe.
+- the playground is named fourierkit on screen and its bundle id is `com.karanganesan.fourierkit`. `scripts/archive.sh ios|macos [upload]` archives it for testflight and the app store. the mac archive is sandboxed, which the mac app store requires, so it keeps its model and transcripts in its own container. the app carries a privacy manifest.
 - a device build reads the team id from `FourierPlayground/Local.xcconfig`, which git ignores. `Local.example.xcconfig` shows what to fill in.
 
 ### engine

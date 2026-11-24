@@ -1,4 +1,9 @@
 // build settings that differ per machine live in Local.xcconfig, which git ignores.
 // see Local.example.xcconfig. the file is optional: without it the mac app is signed ad hoc.
-FOURIER_BUNDLE_ID = com.karanganesan.FourierPlayground
+FOURIER_BUNDLE_ID = com.karanganesan.fourierkit
+
+// the mac app is not sandboxed in a development build. scripts/archive.sh turns the sandbox on
+// for the app store, which requires it.
+FOURIER_MAC_ENTITLEMENTS = FourierPlayground.entitlements
+FOURIER_MAC_SANDBOX = NO
 #include? "Local.xcconfig"

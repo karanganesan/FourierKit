@@ -260,9 +260,9 @@ try await speech.prepare()                              // optional: every mode 
 
 let transcript = try await speech.transcribe(contentsOf: url)
 print(transcript.text)</code></pre>
-<p class="dim">add the package by its url. use the main branch for now: the newest tag, 0.0.2, is older than some calls on this page (<code>TranscriptionJob.updates</code>, <code>Recorder.drafts</code>, <code>TranscriptPiece.isExact</code>, <code>ComputeOptions.resolvedPlacement</code>). pin a tag once one includes them. the package supports macos 26 and ios and ipados 26 on apple silicon.</p>
+<p class="dim">add the package by its url. the package supports macos 26 and ios and ipados 26 on apple silicon.</p>
 <pre><code>// Package.swift
-.package(url: "https://github.com/karanganesan/FourierKit.git", branch: "main")</code></pre>
+.package(url: "https://github.com/karanganesan/FourierKit.git", from: "0.0.3")</code></pre>
 <p class="dim"><code>Fourier</code> is a final class and is <code>Sendable</code>. it is safe to call from the main actor: every heavy call is async and leaves the caller's actor at once, and streams are produced off the main actor and coalesced to at most one value per frame. there is one engine per process, so every <code>Fourier</code> instance shares the same weights.</p>
 <div class="table-wrap" tabindex="0" role="region" aria-label="signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
 <tr><th scope="row" class="mono"><code>init(_ options: FourierOptions = FourierOptions())</code></th><td>the default is the recommended setup. see the options reference.</td></tr>
@@ -270,7 +270,7 @@ print(transcript.text)</code></pre>
 <tr><th scope="row" class="mono"><code>func prepare() async throws</code></th><td>downloads, verifies, loads and warms the model. optional. calling it again joins the same run, and the work stops only when the last waiting caller cancels. a model that is already ready finishes at once.</td></tr>
 <tr><th scope="row" class="mono"><code>var prepareProgress: AsyncStream&lt;PrepareProgress&gt;</code></th><td>one smooth value from 0 to 1 for the current or next prepare run. see prepare progress.</td></tr>
 <tr><th scope="row" class="mono"><code>func warm() async throws</code></th><td>applies the keep-warm option, then does the same as prepare().</td></tr>
-<tr><th scope="row" class="mono"><code>static let version: String</code></th><td>the sdk's version, <code>"0.0.2"</code>. the package is versioned by its git tag, which matches this.</td></tr>
+<tr><th scope="row" class="mono"><code>static let version: String</code></th><td>the sdk's version, <code>"0.0.3"</code>. the package is versioned by its git tag, which matches this.</td></tr>
 <tr><th scope="row" class="mono"><code>func cool() async</code></th><td>lets go of the model's memory if nothing is running. the next use warms it again.</td></tr>
 </tbody></table></div>
 </section>

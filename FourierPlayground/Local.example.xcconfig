@@ -4,5 +4,5 @@
 // your apple developer team id, the ten characters shown in the developer portal
 DEVELOPMENT_TEAM = YOURTEAMID
 
-// optional: a bundle id of your own, if com.karanganesan.FourierPlayground is not yours to sign
-// FOURIER_BUNDLE_ID = com.example.FourierPlayground
+// optional: a bundle id of your own, if com.karanganesan.fourierkit is not yours to sign
+// FOURIER_BUNDLE_ID = com.example.fourierkit

@@ -18,7 +18,7 @@ struct FourierPlaygroundApp: App {
 
     var body: some Scene {
         #if os(macOS)
-        Window("fourier playground", id: "main") {
+        Window("fourierkit", id: "main") {
             ContentView()
                 .environment(app)
                 .task { await app.launch() }

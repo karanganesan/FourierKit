@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import os
 
-private let log = Logger(subsystem: "com.karanganesan.FourierPlayground", category: "recents")
+private let log = Logger(subsystem: "com.karanganesan.fourierkit", category: "recents")
 
 /// one saved transcript. `text` is the model's exact text; screens lowercase it for display only.
 struct RecentTranscript: Codable, Hashable, Identifiable, Sendable {

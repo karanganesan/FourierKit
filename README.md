@@ -46,10 +46,8 @@ what this does not claim:
 add the package by its url in xcode (file, add package dependencies), or in `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/karanganesan/FourierKit.git", branch: "main")
+.package(url: "https://github.com/karanganesan/FourierKit.git", from: "0.0.3")
 ```
-
-use `branch: "main"` for now. the newest tag, 0.0.2, is older than some calls below (`TranscriptionJob.updates`, `Recorder.drafts`, `TranscriptPiece.isExact`, `ComputeOptions.resolvedPlacement`). pin a tag once one includes them.
 
 then add the `FourierKit` product to your target, and `FourierKitUI` if you want the default views.
 
