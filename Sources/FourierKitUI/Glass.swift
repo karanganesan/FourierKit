@@ -31,7 +31,12 @@ extension View {
     /// of it has nothing behind it to bend. the window uses the system material that blurs what is
     /// behind the window instead, which is the closest match and also light or dark with the system.
     public func fourierGlassWindow() -> some View {
+        #if os(macOS)
         containerBackground(FourierGlass.window, for: .window)
+        #else
+        // an ios scene has no window background to set, so the material fills the screen behind the view
+        background { Rectangle().fill(FourierGlass.window).ignoresSafeArea() }
+        #endif
     }
 
     /// puts loading, progress and permission content on a floating panel of the same glass

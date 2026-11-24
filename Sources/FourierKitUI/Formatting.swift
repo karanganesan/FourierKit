@@ -120,3 +120,17 @@ extension Duration {
         return Double(parts.seconds) + Double(parts.attoseconds) / 1e18
     }
 }
+
+/// the words user-facing text uses for this kind of device and its settings app.
+@usableFromInline
+enum DeviceWords {
+    #if os(macOS)
+    @usableFromInline static let thisDevice = "this mac"
+    @usableFromInline static let settings = "system settings"
+    @usableFromInline static let startHint = "space to start"
+    #else
+    @usableFromInline static let thisDevice = "this device"
+    @usableFromInline static let settings = "settings"
+    @usableFromInline static let startHint = "tap to start"
+    #endif
+}

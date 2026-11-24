@@ -247,25 +247,25 @@ td .sig, th .sig { white-space: nowrap; }
 <main>
 <h1>performance</h1>
 <p class="lead">every golden run, measured end to end. the numbers on this page come from the log, and nothing here is a goal.</p>
-<p class="status">5 runs logged, 4 passed, 1 failed. newest passing: 2026-11-24 05:21 utc, prefill attention on the matrix kernel, quiet machine</p>
+<p class="status">6 runs logged, 5 passed, 1 failed. newest passing: 2026-11-24 06:32 utc, after the ios port and device profile, machine shared</p>
 <section aria-labelledby="scoreboard"><h2 id="scoreboard">scoreboard</h2>
-<p class="dim">the newest passing run: 2026-11-24 05:21 utc, "prefill attention on the matrix kernel, quiet machine". speed is audio seconds per wall second, from the median of the warm repeats. a failed run is never shown here.</p>
+<p class="dim">the newest passing run: 2026-11-24 06:32 utc, "after the ios port and device profile, machine shared". speed is audio seconds per wall second, from the median of the warm repeats. a failed run is never shown here.</p>
 <div class="table-wrap" tabindex="0" role="region" aria-label="scoreboard by clip"><table>
 <thead><tr><th scope="col">per clip</th><th scope="col" class="num">short</th><th scope="col" class="num">medium</th><th scope="col" class="num">long</th></tr></thead>
 <tbody>
 <tr><th scope="row">audio</th><td class="num">3.70 s</td><td class="num">11.20 s</td><td class="num">116.50 s</td></tr>
-<tr><th scope="row">wall time, warm</th><td class="num">854 ms</td><td class="num">1.79 s</td><td class="num">18.38 s</td></tr>
-<tr><th scope="row">wall time, cold</th><td class="num">1.24 s</td><td class="num">1.79 s</td><td class="num">17.74 s</td></tr>
-<tr><th scope="row">speed</th><td class="num">4.33x</td><td class="num">6.24x</td><td class="num">6.34x</td></tr>
+<tr><th scope="row">wall time, warm</th><td class="num">866 ms</td><td class="num">1.87 s</td><td class="num">19.01 s</td></tr>
+<tr><th scope="row">wall time, cold</th><td class="num">1.30 s</td><td class="num">1.82 s</td><td class="num">18.13 s</td></tr>
+<tr><th scope="row">speed</th><td class="num">4.27x</td><td class="num">6.00x</td><td class="num">6.13x</td></tr>
 <tr><th scope="row">tokens</th><td class="num">12</td><td class="num">27</td><td class="num">282</td></tr>
-<tr><th scope="row">tokens per second</th><td class="num">14.0</td><td class="num">15.1</td><td class="num">15.3</td></tr>
+<tr><th scope="row">tokens per second</th><td class="num">13.9</td><td class="num">14.5</td><td class="num">14.8</td></tr>
 <tr><th scope="row">decoder steps</th><td class="num">13</td><td class="num">30</td><td class="num">285</td></tr>
-<tr><th scope="row">decoder steps per second</th><td class="num">21.7</td><td class="num">21.5</td><td class="num">19.2</td></tr>
-<tr><th scope="row">time to first text</th><td class="num">299 ms</td><td class="num">447 ms</td><td class="num">3.26 s</td></tr>
-<tr><th scope="row">mel</th><td class="num">0.22 ms</td><td class="num">0.45 ms</td><td class="num">3.89 ms</td></tr>
-<tr><th scope="row">encode</th><td class="num">60 ms</td><td class="num">115 ms</td><td class="num">848 ms</td></tr>
-<tr><th scope="row">prefill</th><td class="num">238 ms</td><td class="num">330 ms</td><td class="num">2.32 s</td></tr>
-<tr><th scope="row">decode</th><td class="num">552 ms</td><td class="num">1.35 s</td><td class="num">14.76 s</td></tr>
+<tr><th scope="row">decoder steps per second</th><td class="num">21.3</td><td class="num">20.9</td><td class="num">18.6</td></tr>
+<tr><th scope="row">time to first text</th><td class="num">303 ms</td><td class="num">449 ms</td><td class="num">3.27 s</td></tr>
+<tr><th scope="row">mel</th><td class="num">0.23 ms</td><td class="num">0.45 ms</td><td class="num">3.96 ms</td></tr>
+<tr><th scope="row">encode</th><td class="num">59 ms</td><td class="num">116 ms</td><td class="num">855 ms</td></tr>
+<tr><th scope="row">prefill</th><td class="num">242 ms</td><td class="num">331 ms</td><td class="num">2.40 s</td></tr>
+<tr><th scope="row">decode</th><td class="num">562 ms</td><td class="num">1.39 s</td><td class="num">15.29 s</td></tr>
 <tr><th scope="row">safety margin used</th><td class="num">2%</td><td class="num">36%</td><td class="num">5%</td></tr>
 </tbody>
 </table></div>
@@ -273,10 +273,10 @@ td .sig, th .sig { white-space: nowrap; }
 <div class="table-wrap" tabindex="0" role="region" aria-label="scoreboard for the whole run"><table>
 <thead><tr><th scope="col">whole run</th><th scope="col" class="num">value</th></tr></thead>
 <tbody>
-<tr><th scope="row">batch throughput</th><td class="num">6.28x</td></tr>
-<tr><th scope="row">sustained throughput</th><td class="num">6.18x</td></tr>
-<tr><th scope="row">cold load</th><td class="num">176 ms</td></tr>
-<tr><th scope="row">warm load</th><td class="num">87 ms</td></tr>
+<tr><th scope="row">batch throughput</th><td class="num">6.20x</td></tr>
+<tr><th scope="row">sustained throughput</th><td class="num">4.99x</td></tr>
+<tr><th scope="row">cold load</th><td class="num">123 ms</td></tr>
+<tr><th scope="row">warm load</th><td class="num">112 ms</td></tr>
 <tr><th scope="row">peak memory</th><td class="num">3.70 gb</td></tr>
 <tr><th scope="row">thermal state</th><td class="num"><span>fair</span></td></tr>
 <tr><th scope="row">placement</th><td class="num"><span>mel cpu, encoder gpu, decoder gpu, search cpu</span></td></tr>
@@ -293,8 +293,8 @@ td .sig, th .sig { white-space: nowrap; }
 <tr><th scope="row">audio</th><td class="num">3.70 s</td><td class="num">11.20 s</td><td class="num">116.50 s</td></tr>
 <tr><th scope="row">transformers, wall time</th><td class="num">3.36 s</td><td class="num">9.51 s</td><td class="num">143.59 s</td></tr>
 <tr><th scope="row">transformers, speed</th><td class="num">1.10x</td><td class="num">1.18x</td><td class="num">0.81x</td></tr>
-<tr><th scope="row">fourierkit, speed</th><td class="num">4.33x</td><td class="num">6.24x</td><td class="num">6.34x</td></tr>
-<tr><th scope="row">fourierkit against transformers</th><td class="num">3.93x</td><td class="num">5.30x</td><td class="num">7.81x</td></tr>
+<tr><th scope="row">fourierkit, speed</th><td class="num">4.27x</td><td class="num">6.00x</td><td class="num">6.13x</td></tr>
+<tr><th scope="row">fourierkit against transformers</th><td class="num">3.88x</td><td class="num">5.09x</td><td class="num">7.55x</td></tr>
 </tbody>
 </table></div>
 <p class="small dim">the last row is how many times faster than transformers the newest passing run is. under 1.00x means slower.</p>
@@ -302,12 +302,13 @@ td .sig, th .sig { white-space: nowrap; }
 <section aria-labelledby="climb"><h2 id="climb">the climb</h2>
 <p class="dim">speed on the long clip and sustained throughput, run by run in the order they were logged. a filled point passed the golden test. a hollow point failed it. the numbers under the chart name each run.</p>
 <div class="legend"><span><i class="sw"></i>long clip speed</span><span><i class="sw dots"></i>sustained throughput</span></div>
-<div class="chart"><svg viewBox="0 0 960 320" role="img" aria-label="long clip speed and sustained throughput by run, in x realtime"><title>long clip speed and sustained throughput by run, in x realtime</title><line class="grid" x1="48.0" x2="936.0" y1="280.0" y2="280.0"/><text x="40.0" y="284.0" text-anchor="end">0x</text><line class="grid" x1="48.0" x2="936.0" y1="214.0" y2="214.0"/><text x="40.0" y="218.0" text-anchor="end">2x</text><line class="grid" x1="48.0" x2="936.0" y1="148.0" y2="148.0"/><text x="40.0" y="152.0" text-anchor="end">4x</text><line class="grid" x1="48.0" x2="936.0" y1="82.0" y2="82.0"/><text x="40.0" y="86.0" text-anchor="end">6x</text><line class="grid" x1="48.0" x2="936.0" y1="16.0" y2="16.0"/><text x="40.0" y="20.0" text-anchor="end">8x</text><text x="48.0" y="308.0" text-anchor="middle">1</text><text x="270.0" y="308.0" text-anchor="middle">2</text><text x="492.0" y="308.0" text-anchor="middle">3</text><text x="714.0" y="308.0" text-anchor="middle">4</text><text x="936.0" y="308.0" text-anchor="middle">5</text><path class="s1" d="M48.0 202.2 L270.0 176.7 L492.0 127.2 L714.0 80.3 L936.0 70.9 " stroke-linejoin="round"/><circle class="full p1" cx="48.0" cy="202.2" r="4"><title>run 1, long clip speed: 2.36x</title></circle><circle class="hollow p1" cx="270.0" cy="176.7" r="4"><title>run 2, long clip speed: 3.13x, failed</title></circle><circle class="full p1" cx="492.0" cy="127.2" r="4"><title>run 3, long clip speed: 4.63x</title></circle><circle class="full p1" cx="714.0" cy="80.3" r="4"><title>run 4, long clip speed: 6.05x</title></circle><circle class="full p1" cx="936.0" cy="70.9" r="4"><title>run 5, long clip speed: 6.34x</title></circle><path class="s2" d="M48.0 244.4 L270.0 169.1 L492.0 189.1 L714.0 78.3 L936.0 76.2 " stroke-linejoin="round"/><circle class="full p2" cx="48.0" cy="244.4" r="4"><title>run 1, sustained throughput: 1.08x</title></circle><circle class="hollow p2" cx="270.0" cy="169.1" r="4"><title>run 2, sustained throughput: 3.36x, failed</title></circle><circle class="full p2" cx="492.0" cy="189.1" r="4"><title>run 3, sustained throughput: 2.76x</title></circle><circle class="full p2" cx="714.0" cy="78.3" r="4"><title>run 4, sustained throughput: 6.11x</title></circle><circle class="full p2" cx="936.0" cy="76.2" r="4"><title>run 5, sustained throughput: 6.18x</title></circle></svg></div><div class="table-wrap" tabindex="0" role="region" aria-label="every logged run"><table><thead><tr><th scope="col" class="num">run</th><th scope="col">date</th><th scope="col">label</th><th scope="col" class="num">long speed</th><th scope="col" class="num">batch throughput</th><th scope="col" class="num">sustained</th><th scope="col">golden test</th></tr></thead><tbody>
+<div class="chart"><svg viewBox="0 0 960 320" role="img" aria-label="long clip speed and sustained throughput by run, in x realtime"><title>long clip speed and sustained throughput by run, in x realtime</title><line class="grid" x1="48.0" x2="936.0" y1="280.0" y2="280.0"/><text x="40.0" y="284.0" text-anchor="end">0x</text><line class="grid" x1="48.0" x2="936.0" y1="214.0" y2="214.0"/><text x="40.0" y="218.0" text-anchor="end">2x</text><line class="grid" x1="48.0" x2="936.0" y1="148.0" y2="148.0"/><text x="40.0" y="152.0" text-anchor="end">4x</text><line class="grid" x1="48.0" x2="936.0" y1="82.0" y2="82.0"/><text x="40.0" y="86.0" text-anchor="end">6x</text><line class="grid" x1="48.0" x2="936.0" y1="16.0" y2="16.0"/><text x="40.0" y="20.0" text-anchor="end">8x</text><text x="48.0" y="308.0" text-anchor="middle">1</text><text x="225.6" y="308.0" text-anchor="middle">2</text><text x="403.2" y="308.0" text-anchor="middle">3</text><text x="580.8" y="308.0" text-anchor="middle">4</text><text x="758.4" y="308.0" text-anchor="middle">5</text><text x="936.0" y="308.0" text-anchor="middle">6</text><path class="s1" d="M48.0 202.2 L225.6 176.7 L403.2 127.2 L580.8 80.3 L758.4 70.9 L936.0 77.8 " stroke-linejoin="round"/><circle class="full p1" cx="48.0" cy="202.2" r="4"><title>run 1, long clip speed: 2.36x</title></circle><circle class="hollow p1" cx="225.6" cy="176.7" r="4"><title>run 2, long clip speed: 3.13x, failed</title></circle><circle class="full p1" cx="403.2" cy="127.2" r="4"><title>run 3, long clip speed: 4.63x</title></circle><circle class="full p1" cx="580.8" cy="80.3" r="4"><title>run 4, long clip speed: 6.05x</title></circle><circle class="full p1" cx="758.4" cy="70.9" r="4"><title>run 5, long clip speed: 6.34x</title></circle><circle class="full p1" cx="936.0" cy="77.8" r="4"><title>run 6, long clip speed: 6.13x</title></circle><path class="s2" d="M48.0 244.4 L225.6 169.1 L403.2 189.1 L580.8 78.3 L758.4 76.2 L936.0 115.2 " stroke-linejoin="round"/><circle class="full p2" cx="48.0" cy="244.4" r="4"><title>run 1, sustained throughput: 1.08x</title></circle><circle class="hollow p2" cx="225.6" cy="169.1" r="4"><title>run 2, sustained throughput: 3.36x, failed</title></circle><circle class="full p2" cx="403.2" cy="189.1" r="4"><title>run 3, sustained throughput: 2.76x</title></circle><circle class="full p2" cx="580.8" cy="78.3" r="4"><title>run 4, sustained throughput: 6.11x</title></circle><circle class="full p2" cx="758.4" cy="76.2" r="4"><title>run 5, sustained throughput: 6.18x</title></circle><circle class="full p2" cx="936.0" cy="115.2" r="4"><title>run 6, sustained throughput: 4.99x</title></circle></svg></div><div class="table-wrap" tabindex="0" role="region" aria-label="every logged run"><table><thead><tr><th scope="col" class="num">run</th><th scope="col">date</th><th scope="col">label</th><th scope="col" class="num">long speed</th><th scope="col" class="num">batch throughput</th><th scope="col" class="num">sustained</th><th scope="col">golden test</th></tr></thead><tbody>
 <tr><th scope="row" class="num">1</th><td>2026-11-24 01:59 utc</td><td>first end-to-end run, gpu, machine busy</td><td class="num">2.36x</td><td class="num">2.73x</td><td class="num">1.08x</td><td><span class="mark pass">passed</span></td></tr>
 <tr><th scope="row" class="num">2</th><td>2026-11-24 04:16 utc</td><td>wide multiplies on apple's kernel, parallel norm and attention</td><td class="num">3.13x</td><td class="num">4.86x</td><td class="num">3.36x</td><td><span class="mark fail">failed</span></td></tr>
 <tr><th scope="row" class="num">3</th><td>2026-11-24 04:37 utc</td><td>new long clip, two-sum kernel, gpu encoder and decoder, machine shared</td><td class="num">4.63x</td><td class="num">3.89x</td><td class="num">2.76x</td><td><span class="mark pass">passed</span></td></tr>
 <tr><th scope="row" class="num">4</th><td>2026-11-24 04:58 utc</td><td>plateau: gpu encoder and decoder, quiet machine</td><td class="num">6.05x</td><td class="num">5.51x</td><td class="num">6.11x</td><td><span class="mark pass">passed</span></td></tr>
 <tr><th scope="row" class="num">5</th><td>2026-11-24 05:21 utc</td><td>prefill attention on the matrix kernel, quiet machine</td><td class="num">6.34x</td><td class="num">6.28x</td><td class="num">6.18x</td><td><span class="mark pass">passed</span></td></tr>
+<tr><th scope="row" class="num">6</th><td>2026-11-24 06:32 utc</td><td>after the ios port and device profile, machine shared</td><td class="num">6.13x</td><td class="num">6.20x</td><td class="num">4.99x</td><td><span class="mark pass">passed</span></td></tr>
 </tbody></table></div>
 <h3 style="margin-top:32px">why runs failed</h3>
 <ul class="rules">
@@ -328,13 +329,13 @@ td .sig, th .sig { white-space: nowrap; }
 <p class="small dim">the log is <code>docs/performance.jsonl</code>, one json line per run. this page is rebuilt from it with <code>swift scripts/performance.swift</code>.</p>
 </section>
 <section aria-labelledby="live"><h2 id="live">live replay</h2>
-<p class="dim">each golden clip played in at real speed through <code>listen</code>, from the run labelled prefill attention on the matrix kernel, quiet machine. settled text was never taken back, and every final phrase equals <code>transcribe</code> on the same split points.</p>
+<p class="dim">each golden clip played in at real speed through <code>listen</code>, from the run labelled after the ios port and device profile, machine shared. settled text was never taken back, and every final phrase equals <code>transcribe</code> on the same split points.</p>
 <div class="table-wrap" tabindex="0" role="region" aria-label="live replay by clip"><table>
 <thead><tr><th scope="col">clip</th><th scope="col" class="num">first text</th><th scope="col" class="num">median draft delay</th><th scope="col" class="num">worst delay</th><th scope="col" class="num">updates</th><th scope="col" class="num">draft changes</th><th scope="col" class="num">phrases</th><th scope="col" class="num">finish waited</th></tr></thead>
 <tbody>
-<tr><th scope="row">short</th><td class="num">1.05 s</td><td class="num">420 ms</td><td class="num">520 ms</td><td class="num">7</td><td class="num">6</td><td class="num">1</td><td class="num">1.44 s</td></tr>
-<tr><th scope="row">medium</th><td class="num">1.01 s</td><td class="num">520 ms</td><td class="num">740 ms</td><td class="num">19</td><td class="num">17</td><td class="num">1</td><td class="num">3.03 s</td></tr>
-<tr><th scope="row">long</th><td class="num">667 ms</td><td class="num">780 ms</td><td class="num">4.01 s</td><td class="num">109</td><td class="num">105</td><td class="num">8</td><td class="num">3.82 s</td></tr>
+<tr><th scope="row">short</th><td class="num">1.05 s</td><td class="num">460 ms</td><td class="num">460 ms</td><td class="num">7</td><td class="num">6</td><td class="num">1</td><td class="num">1.42 s</td></tr>
+<tr><th scope="row">medium</th><td class="num">1.01 s</td><td class="num">540 ms</td><td class="num">840 ms</td><td class="num">18</td><td class="num">17</td><td class="num">1</td><td class="num">2.97 s</td></tr>
+<tr><th scope="row">long</th><td class="num">693 ms</td><td class="num">800 ms</td><td class="num">3.90 s</td><td class="num">105</td><td class="num">101</td><td class="num">8</td><td class="num">3.95 s</td></tr>
 </tbody>
 </table></div></section>
 <section aria-labelledby="standing"><h2 id="standing">where it stands</h2>

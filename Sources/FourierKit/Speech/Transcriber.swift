@@ -46,7 +46,7 @@ enum Transcriber {
     static func ranges(samples: [Float], chunking: Chunking) -> [Range<Int>] {
         guard samples.count > onePassLimit else { return [0..<samples.count] }
         let seconds: Double = switch chunking {
-        case .automatic: 30
+        case .automatic: EngineLimits.automaticPieceSeconds
         case .maxPieceLength(let length): min(120, max(1, length.inSeconds))
         }
         return AudioSplitter.pieces(samples: samples, maxSeconds: seconds)

@@ -38,7 +38,7 @@ enum LogMel {
             data.withUnsafeMutableBufferPointer { out in
                 let source = SendablePointer(signal.baseAddress!)
                 let target = SendableMutablePointer(out.baseAddress!)
-                let cores = ProcessInfo.processInfo.activeProcessorCount
+                let cores = DeviceProfile.cpu.activeProcessorCount
                 let chunk = max(64, (frames + cores * 4 - 1) / (cores * 4))
                 let chunks = (frames + chunk - 1) / chunk
                 DispatchQueue.concurrentPerform(iterations: chunks) { index in

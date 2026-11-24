@@ -59,6 +59,7 @@ struct HostSnapshot: Sendable {
     var weightBytes: UInt64 = 0
     var cacheBytes: UInt64 = 0
     var totalSteps = 0
+    var device: DeviceReport?
 }
 
 enum HostFailure: Error, Sendable {
@@ -100,8 +101,9 @@ actor EngineHost {
     /// what core ml planned for the neural engine encoder, if it is loaded
     var neuralPlan: PlacementReport? { neural?.plan }
 
-    /// the widest batch allowed, in rows. the layer above narrows it under pressure.
-    var maxRows = 12
+    /// the widest batch allowed, in rows: the engine's derived width, narrowed under pressure.
+    var maxRows = EngineLimits.rowCap
+    private var underPressure = false
 
     private struct Pending {
         var id: Int
@@ -154,11 +156,15 @@ actor EngineHost {
     /// maps the weights, compiles the kernels and loads the tokenizer. does nothing if already loaded.
     func load(modelDirectory: URL) throws {
         if engine != nil, self.modelDirectory == modelDirectory { return }
-        let engine = try MetalEngine(modelDirectory: modelDirectory)
+        // the generation defaults come first, since they size the decoder cache
+        let settings = try GenerationSettings.load(generationConfigJSON: modelDirectory.appendingPathComponent("generation_config.json"))
+        let engine = try MetalEngine(modelDirectory: modelDirectory, settings: settings)
         tokenizer = try Tokenizer(contentsOf: modelDirectory.appendingPathComponent("tokenizer.json"))
-        defaults = try GenerationSettings.load(generationConfigJSON: modelDirectory.appendingPathComponent("generation_config.json"))
+        defaults = settings
         self.engine = engine
         self.modelDirectory = modelDirectory
+        EngineLimits.current.update { $0 = engine.limits }
+        maxRows = engine.limits.maxRows(underPressure: underPressure)
     }
 
     /// lets go of the weights and caches. waits for nothing: callers cool only when idle.
@@ -175,6 +181,12 @@ actor EngineHost {
 
     func setMaxRows(_ rows: Int) { maxRows = max(1, rows) }
 
+    /// thermal, power or memory pressure narrows the batch to the width the engine derived for it.
+    func setUnderPressure(_ pressured: Bool) {
+        underPressure = pressured
+        if let engine { maxRows = engine.limits.maxRows(underPressure: pressured) }
+    }
+
     func snapshot() -> HostSnapshot {
         var snapshot = HostSnapshot()
         guard let engine else { return snapshot }
@@ -187,6 +199,7 @@ actor EngineHost {
         let perSlot = engine.shape.decoderLayers * engine.shape.keyWidth * 4 * 2
         snapshot.cacheBytes = UInt64(active.reduce(0) { $0 + $1.piece.usedSlots } * perSlot)
         snapshot.totalSteps = totalSteps
+        snapshot.device = DeviceReport(engine.deviceProfile, engine.limits, weightBuffers: engine.weightBuffers.count, slotCapacity: engine.slotCapacity)
         let time = Self.now()
         let recent = recentSteps.filter { time - $0.time < 2 }
         if let first = recent.first, let last = recent.last, recent.count > 1, last.time > first.time {

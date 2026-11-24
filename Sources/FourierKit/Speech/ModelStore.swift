@@ -117,6 +117,7 @@ public struct HuggingFaceModelStore: ModelStore {
         if request.offline { throw FourierError.offlineModelMissing }
 
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        ModelLocation.excludeFromBackup(directory)
         try Self.checkDisk(directory: directory, needed: (verified ? 0 : Self.remainingBytes(weights: weights, part: part, total: total))
             + (missingSmall.isEmpty ? 0 : Self.smallFilesEstimate))
 
@@ -154,6 +155,8 @@ public struct HuggingFaceModelStore: ModelStore {
 
     // MARK: network
 
+    /// a foreground session: on ios the download runs while the app is open. a background
+    /// `URLSessionConfiguration.background` session with range resumes would go here.
     static func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         // nothing that identifies the user or the app

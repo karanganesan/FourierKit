@@ -22,7 +22,7 @@ public struct FourierPrepareView<Accessory: View>: View {
     public init(
         _ model: FourierStateModel,
         title: String = "getting ready",
-        message: String? = "the speech model runs on this mac. it downloads once, then stays here.",
+        message: String? = "the speech model runs on " + DeviceWords.thisDevice + ". it downloads once, then stays here.",
         startsPrepare: Bool = true,
         @ViewBuilder accessory: () -> Accessory
     ) {
@@ -109,7 +109,7 @@ extension FourierPrepareView where Accessory == EmptyView {
     public init(
         _ model: FourierStateModel,
         title: String = "getting ready",
-        message: String? = "the speech model runs on this mac. it downloads once, then stays here.",
+        message: String? = "the speech model runs on " + DeviceWords.thisDevice + ". it downloads once, then stays here.",
         startsPrepare: Bool = true
     ) {
         self.init(model, title: title, message: message, startsPrepare: startsPrepare) { EmptyView() }

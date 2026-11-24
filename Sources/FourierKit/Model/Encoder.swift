@@ -52,7 +52,7 @@ extension MetalEngine {
         }
         let cells = (0...3).map { heights[$0] * widths[$0] }
         let flat = channels * heights[3]
-        let group = 8
+        let group = limits.convGroup
 
         let x = try scratch("enc.x", bytes: chunks * perChunk * width * 4)
         let input = try scratch("enc.in", bytes: group * cells[0] * 4)
@@ -65,10 +65,10 @@ extension MetalEngine {
         let flattened = try scratch("enc.flat", bytes: group * perChunk * flat * 4)
 
         let conv = "model.audio_tower."
-        let w1 = try offset(conv + "conv2d1.weight"), b1 = try offset(conv + "conv2d1.bias")
-        let w2 = try offset(conv + "conv2d2.weight"), b2 = try offset(conv + "conv2d2.bias")
-        let w3 = try offset(conv + "conv2d3.weight"), b3 = try offset(conv + "conv2d3.bias")
-        let wOut = try offset(conv + "conv_out.weight")
+        let w1 = try weight(conv + "conv2d1.weight"), b1 = try weight(conv + "conv2d1.bias")
+        let w2 = try weight(conv + "conv2d2.weight"), b2 = try weight(conv + "conv2d2.bias")
+        let w3 = try weight(conv + "conv2d3.weight"), b3 = try weight(conv + "conv2d3.bias")
+        let wOut = try weight(conv + "conv_out.weight")
 
         var start = 0
         while start < chunks {
@@ -132,14 +132,14 @@ extension MetalEngine {
         }
         for layer in 0..<shape.encoderLayers {
             let p = "model.audio_tower.layers.\(layer)."
-            let ln1 = (try offset(p + "self_attn_layer_norm.weight"), try offset(p + "self_attn_layer_norm.bias"))
-            let ln2 = (try offset(p + "final_layer_norm.weight"), try offset(p + "final_layer_norm.bias"))
-            let wq = (try offset(p + "self_attn.q_proj.weight"), try offset(p + "self_attn.q_proj.bias"))
-            let wk = (try offset(p + "self_attn.k_proj.weight"), try offset(p + "self_attn.k_proj.bias"))
-            let wv = (try offset(p + "self_attn.v_proj.weight"), try offset(p + "self_attn.v_proj.bias"))
-            let wo = (try offset(p + "self_attn.out_proj.weight"), try offset(p + "self_attn.out_proj.bias"))
-            let fc1 = (try offset(p + "fc1.weight"), try offset(p + "fc1.bias"))
-            let fc2 = (try offset(p + "fc2.weight"), try offset(p + "fc2.bias"))
+            let ln1 = (try weight(p + "self_attn_layer_norm.weight"), try weight(p + "self_attn_layer_norm.bias"))
+            let ln2 = (try weight(p + "final_layer_norm.weight"), try weight(p + "final_layer_norm.bias"))
+            let wq = (try weight(p + "self_attn.q_proj.weight"), try weight(p + "self_attn.q_proj.bias"))
+            let wk = (try weight(p + "self_attn.k_proj.weight"), try weight(p + "self_attn.k_proj.bias"))
+            let wv = (try weight(p + "self_attn.v_proj.weight"), try weight(p + "self_attn.v_proj.bias"))
+            let wo = (try weight(p + "self_attn.out_proj.weight"), try weight(p + "self_attn.out_proj.bias"))
+            let fc1 = (try weight(p + "fc1.weight"), try weight(p + "fc1.bias"))
+            let fc2 = (try weight(p + "fc2.weight"), try weight(p + "fc2.bias"))
             let innerWidth = shape.encoderInner
             bodies.append { pass in
                 pass.layerNorm(x: Span(x), y: Span(h), gain: ln1.0, bias: ln1.1, dim: width, count: tokens)
@@ -158,9 +158,9 @@ extension MetalEngine {
                 pass.add(Span(x), Span(o), into: Span(x), count: tokens * width)
             }
         }
-        let post = (try offset("model.audio_tower.ln_post.weight"), try offset("model.audio_tower.ln_post.bias"))
-        let p1 = (try offset("model.multi_modal_projector.linear_1.weight"), try offset("model.multi_modal_projector.linear_1.bias"))
-        let p2 = (try offset("model.multi_modal_projector.linear_2.weight"), try offset("model.multi_modal_projector.linear_2.bias"))
+        let post = (try weight("model.audio_tower.ln_post.weight"), try weight("model.audio_tower.ln_post.bias"))
+        let p1 = (try weight("model.multi_modal_projector.linear_1.weight"), try weight("model.multi_modal_projector.linear_1.bias"))
+        let p2 = (try weight("model.multi_modal_projector.linear_2.weight"), try weight("model.multi_modal_projector.linear_2.bias"))
         let audioWidth = shape.audioWidth
         bodies.append { pass in
             pass.layerNorm(x: Span(x), y: Span(h), gain: post.0, bias: post.1, dim: width, count: tokens)

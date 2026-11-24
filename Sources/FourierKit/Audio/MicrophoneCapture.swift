@@ -1,11 +1,15 @@
 import AVFoundation
 import Accelerate
 import AudioToolbox
+import Foundation
+import Synchronization
+#if os(macOS)
 import CoreAudio
 import CoreServices
-import Foundation
 import Security
-import Synchronization
+#elseif os(iOS)
+import UIKit
+#endif
 
 // MARK: types
 
@@ -13,8 +17,16 @@ enum MicrophonePermission: Sendable, Equatable {
     case notDetermined, granted, denied, restricted
 }
 
+#if os(macOS)
+/// a core audio device id
+typealias InputDeviceID = AudioDeviceID
+#else
+/// the audio session port uid; ios has no device ids
+typealias InputDeviceID = String
+#endif
+
 struct InputDeviceInfo: Sendable, Hashable, Identifiable {
-    var id: AudioDeviceID
+    var id: InputDeviceID
     var uid: String
     var name: String
     var isDefault: Bool
@@ -72,6 +84,31 @@ struct CaptureOptions: Sendable, Equatable {
 
 enum MicrophoneAccess {
     static let usageDescriptionKey = "NSMicrophoneUsageDescription"
+
+    /// shows the system prompt only when the user has not been asked yet.
+    static func request() async -> MicrophonePermission {
+        let current = permission
+        guard current == .notDetermined else { return current }
+        await requestSystemPermission()
+        return permission
+    }
+
+    /// setup mistakes that would make the system kill the app or silently deny it, empty when fine.
+    static func setupProblems(bundle: Bundle = .main) -> [CaptureError] {
+        var problems = [CaptureError]()
+        let usage = bundle.object(forInfoDictionaryKey: usageDescriptionKey) as? String
+        if usage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+            problems.append(.missingUsageDescription)
+        }
+        if lacksAudioInputEntitlement {
+            problems.append(.missingAudioInputEntitlement)
+        }
+        return problems
+    }
+}
+
+#if os(macOS)
+extension MicrophoneAccess {
     static let audioInputEntitlement = "com.apple.security.device.audio-input"
     static let sandboxEntitlement = "com.apple.security.app-sandbox"
     static let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
@@ -87,25 +124,12 @@ enum MicrophoneAccess {
         }
     }
 
-    /// shows the system prompt only when the user has not been asked yet.
-    static func request() async -> MicrophonePermission {
-        let current = permission
-        guard current == .notDetermined else { return current }
+    private static func requestSystemPermission() async {
         _ = await AVCaptureDevice.requestAccess(for: .audio)
-        return permission
     }
 
-    /// setup mistakes that would make the system kill the app or silently deny it, empty when fine.
-    static func setupProblems(bundle: Bundle = .main) -> [CaptureError] {
-        var problems = [CaptureError]()
-        let usage = bundle.object(forInfoDictionaryKey: usageDescriptionKey) as? String
-        if usage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
-            problems.append(.missingUsageDescription)
-        }
-        if isSandboxed && entitlement(audioInputEntitlement) != true {
-            problems.append(.missingAudioInputEntitlement)
-        }
-        return problems
+    private static var lacksAudioInputEntitlement: Bool {
+        isSandboxed && entitlement(audioInputEntitlement) != true
     }
 
     static var isSandboxed: Bool { entitlement(sandboxEntitlement) == true }
@@ -124,9 +148,42 @@ enum MicrophoneAccess {
         LSOpenCFURLRef(settingsURL as CFURL, nil) == noErr
     }
 }
+#elseif os(iOS)
+extension MicrophoneAccess {
+    /// never prompts. ios has no restricted state for recording.
+    static var permission: MicrophonePermission {
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted: .granted
+        case .denied: .denied
+        case .undetermined: .notDetermined
+        @unknown default: .denied
+        }
+    }
+
+    private static func requestSystemPermission() async {
+        _ = await AVAudioApplication.requestRecordPermission()
+    }
+
+    /// ios apps are always sandboxed and need no entitlement for the microphone.
+    private static var lacksAudioInputEntitlement: Bool { false }
+
+    /// opens this app's page in the settings app, where the microphone switch is.
+    @discardableResult
+    static func openSettings() -> Bool {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return false }
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { UIApplication.shared.open(url) }
+        } else {
+            DispatchQueue.main.async { UIApplication.shared.open(url) }
+        }
+        return true
+    }
+}
+#endif
 
 // MARK: devices
 
+#if os(macOS)
 enum InputDevices {
     static func list() -> [InputDeviceInfo] {
         let defaultID = defaultInputID()
@@ -238,6 +295,85 @@ enum InputDevices {
         return value.takeRetainedValue() as String
     }
 }
+#elseif os(iOS)
+enum InputDevices {
+    /// the audio session's inputs; the one in the current route is the default. the session lists
+    /// inputs only once its category can record, so before the first capture this may hold just
+    /// the current route or nothing.
+    static func list() -> [InputDeviceInfo] {
+        let session = AVAudioSession.sharedInstance()
+        let current = session.currentRoute.inputs.first?.uid
+        var ports = session.availableInputs ?? []
+        if ports.isEmpty { ports = session.currentRoute.inputs }
+        return ports.map { port in
+            InputDeviceInfo(id: port.uid, uid: port.uid, name: port.portName, isDefault: port.uid == current)
+        }
+    }
+
+    static func port(uid: String) -> AVAudioSessionPortDescription? {
+        AVAudioSession.sharedInstance().availableInputs?.first { $0.uid == uid }
+    }
+
+    /// emits the current list at once, then again whenever the audio route changes.
+    static func changes() -> AsyncStream<[InputDeviceInfo]> {
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: [InputDeviceInfo].self, bufferingPolicy: .bufferingNewest(1))
+        let token = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil
+        ) { _ in
+            continuation.yield(list())
+        }
+        let registration = ObserverRegistration(token)
+        continuation.onTermination = { _ in registration.remove() }
+        continuation.yield(list())
+        return stream
+    }
+}
+
+/// notification observers removed together, from any thread.
+final class ObserverRegistration: @unchecked Sendable {
+    private let tokens: [any NSObjectProtocol]
+
+    init(_ tokens: any NSObjectProtocol...) { self.tokens = tokens }
+
+    func remove() {
+        for token in tokens { NotificationCenter.default.removeObserver(token) }
+    }
+}
+
+/// the shared audio session, configured so capture means the same thing it does on the mac:
+/// raw input without voice processing, apple's voice chain with it.
+enum CaptureSession {
+    /// sets category, mode and the preferred input, then activates. it changes only what differs,
+    /// so a rebuild does not cause the route changes that would trigger another rebuild.
+    /// - returns: false when the preferred input is not available
+    static func activate(voiceProcessing: Bool, preferredUID: String?) throws -> Bool {
+        let session = AVAudioSession.sharedInstance()
+        // measurement turns off the system's own gain and filtering, like the raw input on the mac
+        let mode: AVAudioSession.Mode = voiceProcessing ? .voiceChat : .measurement
+        // bluetooth hfp so headset microphones are listed, as every input is on the mac
+        let options: AVAudioSession.CategoryOptions = [.allowBluetoothHFP]
+        if session.category != .playAndRecord || session.mode != mode || session.categoryOptions != options {
+            try session.setCategory(.playAndRecord, mode: mode, options: options)
+        }
+        try session.setActive(true)
+        guard let preferredUID else {
+            if session.preferredInput != nil { try session.setPreferredInput(nil) }
+            return true
+        }
+        guard let port = InputDevices.port(uid: preferredUID) else { return false }
+        if session.preferredInput?.uid != preferredUID { try session.setPreferredInput(port) }
+        return true
+    }
+
+    static var isInputAvailable: Bool { AVAudioSession.sharedInstance().isInputAvailable }
+
+    /// lets other apps' audio resume.
+    static func deactivate() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+}
+#endif
 
 // MARK: capture
 
@@ -271,7 +407,15 @@ final class MicrophoneCapture: @unchecked Sendable {
     private var processor: RenderProcessor?
     private var observer: NSObjectProtocol?
     private var reader: Task<Void, Never>?
+    #if os(macOS)
     private var deviceListener: AudioObjectPropertyListenerBlock?
+    #elseif os(iOS)
+    private var sessionObservers: ObserverRegistration?
+    /// another app or a call holds the audio session; nothing rebuilds until it ends
+    private var interrupted = false
+    /// whether this capture activated the session, so a failure never deactivates the app's own
+    private var sessionActivated = false
+    #endif
     private var stopped = false
 
     init(options: CaptureOptions = CaptureOptions()) {
@@ -338,6 +482,7 @@ final class MicrophoneCapture: @unchecked Sendable {
             stopped = true
             unwatchDevices()
             tearDown()
+            releaseRoute()
             setState(.off)
             return self.reader
         }
@@ -361,21 +506,12 @@ final class MicrophoneCapture: @unchecked Sendable {
     }
 
     private func buildAndStart(voiceProcessing: Bool) throws {
-        guard InputDevices.defaultInputID() != nil || options.preferredDeviceUID != nil else {
-            throw CaptureError.noInputDevice
-        }
+        try prepareRoute(voiceProcessing: voiceProcessing)
         let engine = AVAudioEngine()
         // stored first so a failure below is cleaned up by `tearDown()`
         self.engine = engine
         let input = engine.inputNode
-
-        if let uid = options.preferredDeviceUID {
-            if let id = InputDevices.deviceID(uid: uid) {
-                try setDevice(id, on: input)
-            } else {
-                eventContinuation.yield(.preferredDeviceUnavailable(uid: uid))
-            }
-        }
+        try selectPreferredDevice(on: input)
 
         if voiceProcessing {
             try input.setVoiceProcessingEnabled(true)
@@ -404,24 +540,16 @@ final class MicrophoneCapture: @unchecked Sendable {
         }
         engine.attach(sink)
         engine.connect(input, to: sink, format: format)
+        let changed = ObjectIdentifier(engine)
         observer = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
         ) { [weak self] _ in
             guard let self else { return }
-            self.control.async { [weak self] in self?.rebuild(reason: .configurationChange) }
+            self.control.async { [weak self] in self?.engineConfigurationChanged(changed) }
         }
 
         engine.prepare()
         try engine.start()
-    }
-
-    private func setDevice(_ id: AudioDeviceID, on input: AVAudioInputNode) throws {
-        guard let unit = input.audioUnit else { throw CaptureError.engineFailed("input has no audio unit") }
-        var device = id
-        let status = AudioUnitSetProperty(
-            unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
-            &device, UInt32(MemoryLayout<AudioDeviceID>.size))
-        if status != noErr { throw CaptureError.engineFailed("could not select the input device (\(status))") }
     }
 
     private func tearDown() {
@@ -446,6 +574,19 @@ final class MicrophoneCapture: @unchecked Sendable {
         }
         setState(.interrupted)
         tearDown()
+        restart()
+    }
+
+    private func engineConfigurationChanged(_ changed: ObjectIdentifier) {
+        #if os(iOS)
+        // a route change may already have rebuilt this engine
+        guard let engine, ObjectIdentifier(engine) == changed else { return }
+        #endif
+        rebuild(reason: .configurationChange)
+    }
+
+    /// builds a new engine after the old one was torn down.
+    private func restart() {
         eventContinuation.yield(.configurationChanged(audioMayBeLost: true))
         do {
             try startEngine()
@@ -459,34 +600,9 @@ final class MicrophoneCapture: @unchecked Sendable {
         }
     }
 
-    /// while a session runs, device changes can revive a capture that failed, e.g. when a mic is plugged back in.
-    private func watchDevices() {
-        guard deviceListener == nil else { return }
-        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.rebuild(reason: .deviceListChange)
-        }
-        for selector in Self.deviceSelectors {
-            var address = AudioObjectPropertyAddress(
-                mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, control, listener)
-        }
-        deviceListener = listener
-    }
-
-    private func unwatchDevices() {
-        guard let listener = deviceListener else { return }
-        for selector in Self.deviceSelectors {
-            var address = AudioObjectPropertyAddress(
-                mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, control, listener)
-        }
-        deviceListener = nil
-    }
-
-    private static let deviceSelectors = [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice]
-
     private func fail(_ error: CaptureError) throws -> Never {
         tearDown()
+        releaseRoute()
         setState(.failed(error))
         throw error
     }
@@ -561,6 +677,159 @@ final class MicrophoneCapture: @unchecked Sendable {
     }
 }
 
+// MARK: platform routing (control queue)
+
+#if os(macOS)
+extension MicrophoneCapture {
+    private func prepareRoute(voiceProcessing: Bool) throws {
+        guard InputDevices.defaultInputID() != nil || options.preferredDeviceUID != nil else {
+            throw CaptureError.noInputDevice
+        }
+    }
+
+    private func selectPreferredDevice(on input: AVAudioInputNode) throws {
+        guard let uid = options.preferredDeviceUID else { return }
+        if let id = InputDevices.deviceID(uid: uid) {
+            try setDevice(id, on: input)
+        } else {
+            eventContinuation.yield(.preferredDeviceUnavailable(uid: uid))
+        }
+    }
+
+    private func setDevice(_ id: AudioDeviceID, on input: AVAudioInputNode) throws {
+        guard let unit = input.audioUnit else { throw CaptureError.engineFailed("input has no audio unit") }
+        var device = id
+        let status = AudioUnitSetProperty(
+            unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+            &device, UInt32(MemoryLayout<AudioDeviceID>.size))
+        if status != noErr { throw CaptureError.engineFailed("could not select the input device (\(status))") }
+    }
+
+    private func releaseRoute() {}
+
+    /// while a session runs, device changes can revive a capture that failed, e.g. when a mic is plugged back in.
+    private func watchDevices() {
+        guard deviceListener == nil else { return }
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.rebuild(reason: .deviceListChange)
+        }
+        for selector in Self.deviceSelectors {
+            var address = AudioObjectPropertyAddress(
+                mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, control, listener)
+        }
+        deviceListener = listener
+    }
+
+    private func unwatchDevices() {
+        guard let listener = deviceListener else { return }
+        for selector in Self.deviceSelectors {
+            var address = AudioObjectPropertyAddress(
+                mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, control, listener)
+        }
+        deviceListener = nil
+    }
+
+    private static let deviceSelectors = [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice]
+}
+#elseif os(iOS)
+extension MicrophoneCapture {
+    /// configures and activates the audio session for this kind of capture and picks the input.
+    private func prepareRoute(voiceProcessing: Bool) throws {
+        let found: Bool
+        do {
+            found = try CaptureSession.activate(voiceProcessing: voiceProcessing, preferredUID: options.preferredDeviceUID)
+        } catch {
+            throw CaptureError.engineFailed("the audio session could not start: \(error.localizedDescription)")
+        }
+        sessionActivated = true
+        if !found, let uid = options.preferredDeviceUID {
+            eventContinuation.yield(.preferredDeviceUnavailable(uid: uid))
+        }
+        guard CaptureSession.isInputAvailable else { throw CaptureError.noInputDevice }
+    }
+
+    /// the session's preferred input already chose the device.
+    private func selectPreferredDevice(on input: AVAudioInputNode) throws {}
+
+    private func releaseRoute() {
+        guard sessionActivated else { return }
+        sessionActivated = false
+        CaptureSession.deactivate()
+    }
+
+    /// route changes, interruptions and media server resets, handled on the control queue.
+    private func watchDevices() {
+        guard sessionObservers == nil else { return }
+        let center = NotificationCenter.default
+        let route = center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) {
+            [weak self] note in
+            let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            // category and override changes are our own doing; only devices coming and going count
+            guard let reason = raw.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:)),
+                reason == .newDeviceAvailable || reason == .oldDeviceUnavailable
+            else { return }
+            self?.control.async { [weak self] in self?.routeChanged() }
+        }
+        let interruption = center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: nil) {
+            [weak self] note in
+            let rawType = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            let rawOptions = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            guard let type = rawType.flatMap(AVAudioSession.InterruptionType.init(rawValue:)) else { return }
+            let began = type == .began
+            let shouldResume = AVAudioSession.InterruptionOptions(rawValue: rawOptions).contains(.shouldResume)
+            self?.control.async { [weak self] in self?.interruption(began: began, shouldResume: shouldResume) }
+        }
+        let reset = center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: nil) {
+            [weak self] _ in
+            self?.control.async { [weak self] in self?.rebuild(reason: .configurationChange) }
+        }
+        let active = center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) {
+            [weak self] _ in
+            self?.control.async { [weak self] in self?.resumeIfHeld() }
+        }
+        sessionObservers = ObserverRegistration(route, interruption, reset, active)
+    }
+
+    private func unwatchDevices() {
+        sessionObservers?.remove()
+        sessionObservers = nil
+    }
+
+    /// a running engine with an unchanged input format follows the new route by itself; anything
+    /// else is rebuilt, and a failed capture is revived, as on the mac.
+    private func routeChanged() {
+        guard !stopped, !interrupted else { return }
+        guard let engine, let processor else { return rebuild(reason: .deviceListChange) }
+        if engine.isRunning, engine.inputNode.outputFormat(forBus: 0) == processor.inputFormat {
+            eventContinuation.yield(.configurationChanged(audioMayBeLost: false))
+        } else {
+            rebuild(reason: .configurationChange)
+        }
+    }
+
+    private func interruption(began: Bool, shouldResume: Bool) {
+        guard !stopped else { return }
+        if began {
+            // the system has stopped the engine; dropping it keeps its change notices from rebuilding mid-call
+            interrupted = true
+            setState(.interrupted)
+            tearDown()
+        } else {
+            interrupted = false
+            if shouldResume { resumeIfHeld() }
+        }
+    }
+
+    /// restarts a capture an interruption stopped, once the system allows it or the app is back in front.
+    private func resumeIfHeld() {
+        guard !stopped, !interrupted, engine == nil, state == .interrupted else { return }
+        restart()
+    }
+}
+#endif
+
 // MARK: realtime path
 
 /// newest peak and rms, published from the render thread without locks.
@@ -589,6 +858,8 @@ final class LevelMeter: Sendable {
 /// owns everything the render callback touches. all buffers and the converter's input block are made up
 /// front, so steady-state callbacks allocate nothing on our side.
 final class RenderProcessor: @unchecked Sendable {
+    /// the format this processor was built for; never read on the render thread
+    let inputFormat: AVAudioFormat
     private let ring: RingBuffer
     private let level: LevelMeter
     private let channels: Int
@@ -601,6 +872,7 @@ final class RenderProcessor: @unchecked Sendable {
     private let inputBlock: AVAudioConverterInputBlock
 
     init?(inputFormat: AVAudioFormat, ring: RingBuffer, level: LevelMeter, firstChannelOnly: Bool) {
+        self.inputFormat = inputFormat
         self.ring = ring
         self.level = level
         self.firstChannelOnly = firstChannelOnly

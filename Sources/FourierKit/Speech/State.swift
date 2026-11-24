@@ -151,8 +151,58 @@ public struct FourierMetrics: Sendable, Equatable {
     public var weightMemory: UInt64 = 0
     /// decoder key-value cache in use
     public var cacheMemory: UInt64 = 0
+    /// what the engine measured on this device and the sizes it chose from that, nil until it loads
+    public var device: DeviceReport?
 
     public init() {}
+}
+
+/// the device facts the engine measured when it loaded, and what it derived from them.
+public struct DeviceReport: Sendable, Hashable {
+    // measured
+    public var gpuName: String
+    public var physicalMemory: UInt64
+    /// how much more the app could use when the engine loaded
+    public var memoryHeadroom: UInt64
+    public var processorCount: Int
+    public var performanceCores: Int?
+    public var maxBufferLength: UInt64
+    public var gpuWorkingSet: UInt64
+    public var hasUnifiedMemory: Bool
+    public var maxThreadsPerThreadgroup: Int
+    public var hasNeuralEngine: Bool
+
+    // derived
+    /// 1 when the checkpoint fits one gpu buffer, more when it is wrapped in windows
+    public var weightBuffers: Int
+    public var cacheSlots: Int
+    public var cacheBytes: UInt64
+    public var maxBatchWidth: Int
+    public var pressuredBatchWidth: Int
+    public var encoderChunkGroup: Int
+    public var automaticPieceLength: Duration
+    public var offersNeuralEngine: Bool
+
+    init(_ profile: DeviceProfile, _ limits: EngineLimits, weightBuffers: Int, slotCapacity: Int) {
+        gpuName = profile.gpuName
+        physicalMemory = UInt64(profile.physicalMemory)
+        memoryHeadroom = UInt64(profile.memoryHeadroom)
+        processorCount = profile.activeProcessorCount
+        performanceCores = profile.performanceCores
+        maxBufferLength = UInt64(profile.maxBufferLength)
+        gpuWorkingSet = UInt64(profile.recommendedMaxWorkingSetSize)
+        hasUnifiedMemory = profile.hasUnifiedMemory
+        maxThreadsPerThreadgroup = profile.maxThreadsPerThreadgroup
+        hasNeuralEngine = profile.hasNeuralEngine
+        self.weightBuffers = weightBuffers
+        cacheSlots = slotCapacity
+        cacheBytes = UInt64(slotCapacity * limits.bytesPerSlot)
+        maxBatchWidth = limits.maxRows
+        pressuredBatchWidth = limits.pressuredMaxRows
+        encoderChunkGroup = limits.convGroup
+        automaticPieceLength = .seconds(limits.automaticPieceSeconds)
+        offersNeuralEngine = limits.offersNeuralEngine
+    }
 }
 
 // MARK: microphone

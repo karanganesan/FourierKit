@@ -16,7 +16,7 @@ public struct FourierPermissionView<Granted: View>: View {
     ///   - granted: shown once access is granted
     public init(
         _ model: FourierStateModel,
-        reason: String = "speech is turned into text on this mac. nothing leaves it.",
+        reason: String = "speech is turned into text on " + DeviceWords.thisDevice + ". nothing leaves it.",
         @ViewBuilder granted: () -> Granted
     ) {
         self.model = model
@@ -47,8 +47,8 @@ public struct FourierPermissionView<Granted: View>: View {
                     message(
                         symbol: "mic.slash",
                         title: "microphone is off",
-                        detail: "turn it on in system settings > privacy & security > microphone, then come back.") {
-                            Button("open system settings") { model.openMicrophoneSettings() }
+                        detail: "turn it on in \(DeviceWords.settings) > privacy & security > microphone, then come back.") {
+                            Button("open " + DeviceWords.settings) { model.openMicrophoneSettings() }
                                 .fourierGlassButton()
                                 .fourierTextStyle(.body)
                                 .controlSize(.large)
@@ -57,7 +57,7 @@ public struct FourierPermissionView<Granted: View>: View {
                     message(
                         symbol: "lock",
                         title: "microphone is blocked",
-                        detail: "a device policy blocks the microphone on this mac. ask the person who manages it.")
+                        detail: "a device policy blocks the microphone on \(DeviceWords.thisDevice). ask the person who manages it.")
                 }
             }
         }
@@ -93,7 +93,7 @@ public struct FourierPermissionView<Granted: View>: View {
 }
 
 extension FourierPermissionView where Granted == EmptyView {
-    public init(_ model: FourierStateModel, reason: String = "speech is turned into text on this mac. nothing leaves it.") {
+    public init(_ model: FourierStateModel, reason: String = "speech is turned into text on " + DeviceWords.thisDevice + ". nothing leaves it.") {
         self.init(model, reason: reason) { EmptyView() }
     }
 }

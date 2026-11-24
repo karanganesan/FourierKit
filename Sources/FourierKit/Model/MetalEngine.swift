@@ -72,27 +72,44 @@ enum EngineFailure: Error, CustomStringConvertible {
     case gpu(String)
     case outOfSlots
     case tooLong(String)
+    /// the device cannot hold something the engine needs, such as one tensor in one buffer
+    case deviceLimit(String)
 
     var description: String {
         switch self {
+        #if os(macOS)
         case .noDevice: "this mac has no metal device"
+        #else
+        case .noDevice: "this device has no metal gpu"
+        #endif
         case .badConfig(let why): "the model config is not usable: \(why)"
         case .gpu(let why): "a gpu call failed: \(why)"
         case .outOfSlots: "the decoder cache is full"
         case .tooLong(let why): why
+        case .deviceLimit(let why): why
         }
     }
 }
 
-/// the gpu engine: the checkpoint mapped into one metal buffer, the kernels, and the passes built from them.
+/// a tensor's place on the gpu: the metal buffer that wraps it and its byte offset inside that buffer.
+struct WeightRef {
+    let buffer: MTLBuffer
+    let offset: Int
+}
+
+/// the gpu engine: the checkpoint mapped into metal buffers, the kernels, and the passes built from them.
 ///
 /// one owner at a time. the scheduler above it is the only caller, and it never overlaps two calls.
 final class MetalEngine: @unchecked Sendable {
     let device: MTLDevice
     let queue: MTLCommandQueue
     let shape: ModelShape
+    let deviceProfile: DeviceProfile
+    let limits: EngineLimits
     let weights: SafeTensors
-    let weightBuffer: MTLBuffer
+    /// one buffer over the whole mapping when the device allows it, else page-aligned windows
+    let weightBuffers: [MTLBuffer]
+    private let weightRefs: [String: WeightRef]
     let maxPositions = 4096
 
     private var pipelines: [String: MTLComputePipelineState] = [:]
@@ -120,7 +137,11 @@ final class MetalEngine: @unchecked Sendable {
     /// seconds the gpu spent inside calls, for the busy share in live stats
     private(set) var gpuSeconds: Double = 0
 
-    init(modelDirectory: URL, slotCapacity: Int = 12_288) throws {
+    /// - parameter settings: the generation defaults, which size the decoder cache
+    /// - parameter slotCapacity: overrides the cache size derived from the device
+    /// - parameter weightWindow: wraps the weights in windows of at most this many bytes even when one
+    ///   buffer would do, to check the windowed path on a mac
+    init(modelDirectory: URL, settings: GenerationSettings, slotCapacity: Int? = nil, weightWindow: Int? = nil) throws {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else {
             throw EngineFailure.noDevice
         }
@@ -132,10 +153,11 @@ final class MetalEngine: @unchecked Sendable {
         for (name, tensor) in weights.tensors where tensor.dtype != "BF16" {
             throw EngineFailure.badConfig("\(name) is \(tensor.dtype), and the engine reads raw bf16")
         }
-        guard let mapped = device.makeBuffer(
-            bytesNoCopy: weights.base, length: weights.mappedLength, options: .storageModeShared, deallocator: nil
-        ) else { throw EngineFailure.gpu("the weights could not be wrapped in a metal buffer") }
-        weightBuffer = mapped
+        deviceProfile = DeviceProfile.measure(device: device)
+        limits = try EngineLimits(
+            profile: deviceProfile, shape: shape, mappedLength: weights.mappedLength, weightBytes: weights.fileLength, settings: settings)
+        let window = weightWindow ?? (limits.weightsWindowed ? device.maxBufferLength : nil)
+        (weightBuffers, weightRefs) = try Self.wrap(weights, device: device, window: window)
 
         let options = MTLCompileOptions()
         options.mathMode = .safe
@@ -183,6 +205,7 @@ final class MetalEngine: @unchecked Sendable {
         }
         encoderPositions = try Self.buffer(device, positions)
 
+        let slotCapacity = slotCapacity ?? limits.slotCapacity
         self.slotCapacity = slotCapacity
         let arenaBytes = shape.decoderLayers * slotCapacity * shape.keyWidth * 4
         guard let keys = device.makeBuffer(length: arenaBytes, options: .storageModeShared),
@@ -219,8 +242,52 @@ final class MetalEngine: @unchecked Sendable {
         scratch = scratch.filter { !$0.key.hasPrefix(prefix) }
     }
 
-    func offset(_ name: String) throws -> Int {
-        try weights.tensor(name).offset
+    func weight(_ name: String) throws -> WeightRef {
+        guard let ref = weightRefs[name] else { throw SafeTensors.Failure.missing(name) }
+        return ref
+    }
+
+    /// wraps the mapped checkpoint without copying. when it fits one buffer, that buffer starts at
+    /// the file's first byte and every tensor keeps its file offset. otherwise each window starts on
+    /// the page at or before its first tensor and holds whole tensors only.
+    /// - parameter window: nil for one buffer, else the most bytes one window may span
+    private static func wrap(_ weights: SafeTensors, device: MTLDevice, window: Int?) throws -> ([MTLBuffer], [String: WeightRef]) {
+        let length = weights.mappedLength
+        let page = Int(getpagesize())
+        var windows: [(start: Int, end: Int)] = []
+        var assigned: [(name: String, offset: Int, window: Int)] = []
+        if let window {
+            let limit = window / page * page
+            for tensor in weights.tensors.values.sorted(by: { $0.offset < $1.offset }) {
+                let start = tensor.offset / page * page
+                let end = min(length, (tensor.offset + tensor.byteCount + page - 1) / page * page)
+                guard end - start <= limit else {
+                    throw EngineFailure.deviceLimit(
+                        "the weight \(tensor.name) is \(tensor.byteCount) bytes, more than one metal buffer can hold on this device (\(limit) bytes)")
+                }
+                if let last = windows.last, end - last.start <= limit {
+                    windows[windows.count - 1].end = max(last.end, end)
+                } else {
+                    windows.append((start, end))
+                }
+                assigned.append((tensor.name, tensor.offset, windows.count - 1))
+            }
+        } else {
+            windows = [(0, length)]
+            assigned = weights.tensors.values.map { ($0.name, $0.offset, 0) }
+        }
+        let buffers = try windows.map { window in
+            guard let buffer = device.makeBuffer(
+                bytesNoCopy: weights.base + window.start, length: window.end - window.start,
+                options: .storageModeShared, deallocator: nil
+            ) else { throw EngineFailure.gpu("the weights could not be wrapped in a metal buffer") }
+            return buffer
+        }
+        var refs: [String: WeightRef] = [:]
+        for entry in assigned {
+            refs[entry.name] = WeightRef(buffer: buffers[entry.window], offset: entry.offset - windows[entry.window].start)
+        }
+        return (buffers, refs)
     }
 
     // MARK: running
@@ -359,8 +426,8 @@ final class Pass {
         encoder.setBuffer(span.buffer, offset: span.offset, index: index)
     }
 
-    private func weight(_ offset: Int, _ index: Int) {
-        encoder.setBuffer(engine.weightBuffer, offset: offset, index: index)
+    private func weight(_ ref: WeightRef, _ index: Int) {
+        encoder.setBuffer(ref.buffer, offset: ref.offset, index: index)
     }
 
     private func params<T>(_ value: T, _ index: Int) {
@@ -368,7 +435,7 @@ final class Pass {
     }
 
     /// y[n] = w x[n] + bias for `count` rows
-    func gemm(weight w: Int, bias: Int? = nil, rows: Int, cols: Int, x: Span, xStride: Int? = nil, y: Span, yStride: Int? = nil, count: Int) {
+    func gemm(weight w: WeightRef, bias: WeightRef? = nil, rows: Int, cols: Int, x: Span, xStride: Int? = nil, y: Span, yStride: Int? = nil, count: Int) {
         guard count > 0 else { return }
         if count >= engine.wideRows, cols >= 16, let wide = try? engine.scratch("wide.weights", bytes: 64 << 20), rows * cols * 4 <= wide.length {
             var pipeline = use("widen")
@@ -408,7 +475,7 @@ final class Pass {
         mark(rows > 100_000 ? "gemm, output head" : "gemm")
     }
 
-    func layerNorm(x: Span, y: Span, gain: Int, bias: Int, dim: Int, count: Int) {
+    func layerNorm(x: Span, y: Span, gain: WeightRef, bias: WeightRef, dim: Int, count: Int) {
         let pipeline = use("layer_norm")
         bind(x, 0)
         bind(y, 1)
@@ -418,7 +485,7 @@ final class Pass {
         dispatch(pipeline, count)
     }
 
-    func rmsNorm(x: Span, y: Span, gain: Int, dim: Int, count: Int, eps: Float) {
+    func rmsNorm(x: Span, y: Span, gain: WeightRef, dim: Int, count: Int, eps: Float) {
         precondition(dim % 64 == 0)
         guard let partial = try? engine.scratch("norm.partial", bytes: count * (dim / 64) * 4) else { return }
         let shared = (UInt32(dim), UInt32(count), eps, UInt32(0))
@@ -436,7 +503,7 @@ final class Pass {
         dispatch(pipeline, dim / 4, count)
     }
 
-    func headNormRope(x: Span, y: Span, gain: Int, positions: Span, targets: Span, heads: Int, headDim: Int, count: Int, eps: Float) {
+    func headNormRope(x: Span, y: Span, gain: WeightRef, positions: Span, targets: Span, heads: Int, headDim: Int, count: Int, eps: Float) {
         let pipeline = use("head_norm_rope")
         bind(x, 0)
         bind(y, 1)
@@ -458,7 +525,7 @@ final class Pass {
         dispatch(pipeline, dim, count)
     }
 
-    func embed(table: Int, y: Span, tokens: Span, dim: Int, count: Int) {
+    func embed(table: WeightRef, y: Span, tokens: Span, dim: Int, count: Int) {
         let pipeline = use("embed")
         weight(table, 0)
         bind(y, 1)

@@ -1,6 +1,6 @@
 import Foundation
 
-/// where the pinned checkpoint lives on this mac.
+/// where the pinned checkpoint lives on this device.
 enum ModelLocation {
     static let repository = "oruk/oruk-fourier-2b"
     static let revision = "8c2a8871f1304aa2f634da4fb95e24438c4945b9"
@@ -11,8 +11,18 @@ enum ModelLocation {
 
     static var supportDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
+            ?? URL.applicationSupportDirectory
         return base.appendingPathComponent("FourierKit", isDirectory: true)
+    }
+
+    /// ios backs the app container up to icloud; a model the app can download again stays out of it.
+    static func excludeFromBackup(_ directory: URL) {
+        #if os(iOS)
+        var directory = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? directory.setResourceValues(values)
+        #endif
     }
 
     static func directory(in root: URL, revision: String = revision) -> URL {

@@ -69,24 +69,24 @@ extension MetalEngine {
         promptLength + beams * maxNewTokens
     }
 
-    private struct LayerOffsets {
-        var norm1 = 0, norm2 = 0, q = 0, k = 0, v = 0, o = 0, qNorm = 0, kNorm = 0, gate = 0, up = 0, down = 0
+    private struct LayerWeights {
+        var norm1, norm2, q, k, v, o, qNorm, kNorm, gate, up, down: WeightRef
     }
 
-    private func layerOffsets(_ layer: Int) throws -> LayerOffsets {
+    private func layerWeights(_ layer: Int) throws -> LayerWeights {
         let p = "model.language_model.layers.\(layer)."
-        return LayerOffsets(
-            norm1: try offset(p + "input_layernorm.weight"),
-            norm2: try offset(p + "post_attention_layernorm.weight"),
-            q: try offset(p + "self_attn.q_proj.weight"),
-            k: try offset(p + "self_attn.k_proj.weight"),
-            v: try offset(p + "self_attn.v_proj.weight"),
-            o: try offset(p + "self_attn.o_proj.weight"),
-            qNorm: try offset(p + "self_attn.q_norm.weight"),
-            kNorm: try offset(p + "self_attn.k_norm.weight"),
-            gate: try offset(p + "mlp.gate_proj.weight"),
-            up: try offset(p + "mlp.up_proj.weight"),
-            down: try offset(p + "mlp.down_proj.weight")
+        return LayerWeights(
+            norm1: try weight(p + "input_layernorm.weight"),
+            norm2: try weight(p + "post_attention_layernorm.weight"),
+            q: try weight(p + "self_attn.q_proj.weight"),
+            k: try weight(p + "self_attn.k_proj.weight"),
+            v: try weight(p + "self_attn.v_proj.weight"),
+            o: try weight(p + "self_attn.o_proj.weight"),
+            qNorm: try weight(p + "self_attn.q_norm.weight"),
+            kNorm: try weight(p + "self_attn.k_norm.weight"),
+            gate: try weight(p + "mlp.gate_proj.weight"),
+            up: try weight(p + "mlp.up_proj.weight"),
+            down: try weight(p + "mlp.down_proj.weight")
         )
     }
 
@@ -122,7 +122,7 @@ extension MetalEngine {
 
         var bodies: [(Pass) throws -> Void] = []
         for layer in 0..<shape.decoderLayers {
-            let w = try layerOffsets(layer)
+            let w = try layerWeights(layer)
             let keySpan = Span(keys, layer * layerBytes)
             let valueSpan = Span(values, layer * layerBytes)
             bodies.append { pass in
@@ -165,8 +165,8 @@ extension MetalEngine {
         let x = try scratch(prefix + "x", bytes: 16)
         let h = try scratch(prefix + "h", bytes: 16)
         let logits = try scratch(prefix + "logits", bytes: count * vocabulary * 4)
-        let norm = try offset("model.language_model.norm.weight")
-        let table = try offset("model.language_model.embed_tokens.weight")
+        let norm = try weight("model.language_model.norm.weight")
+        let table = try weight("model.language_model.embed_tokens.weight")
         return { pass in
             pass.rmsNorm(x: Span(x, firstRow * width * 4), y: Span(h), gain: norm, dim: width, count: count, eps: eps)
             pass.gemm(weight: table, rows: vocabulary, cols: width, x: Span(h), y: Span(logits), count: count)
@@ -212,7 +212,7 @@ extension MetalEngine {
                 contexts[row * 4 + 2] = 0
                 contexts[row * 4 + 3] = 0
             }
-            let table = try offset("model.language_model.embed_tokens.weight")
+            let table = try weight("model.language_model.embed_tokens.weight")
             let audioCount = audio.count
             let audioBuffer = audio.buffer
             bodies.insert({ pass in
@@ -283,7 +283,7 @@ extension MetalEngine {
             piece.steps += 1
         }
 
-        let table = try offset("model.language_model.embed_tokens.weight")
+        let table = try weight("model.language_model.embed_tokens.weight")
         let tokenBuffer = try scratch(prefix + "tok", bytes: 16)
         let head = try headBody(prefix: prefix, firstRow: 0, count: rows)
         try await run { pass in

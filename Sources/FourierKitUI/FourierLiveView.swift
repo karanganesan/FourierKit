@@ -146,7 +146,7 @@ public struct FourierLiveView<Accessory: View>: View {
             } else {
                 switch listen.phase {
                 case .idle:
-                    Text(listen.transcript == nil ? "space to start" : "space to start again")
+                    Text(listen.transcript == nil ? DeviceWords.startHint : DeviceWords.startHint + " again")
                         .fourierInk(.tertiary)
                 case .starting:
                     Text("starting")

@@ -28,6 +28,17 @@ func offload<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
     }
 }
 
+/// the words user-facing text uses for this kind of device and its settings app.
+enum DeviceWords {
+    #if os(macOS)
+    static let thisDevice = "this mac"
+    static let settings = "system settings"
+    #else
+    static let thisDevice = "this device"
+    static let settings = "settings"
+    #endif
+}
+
 func now() -> Double { EngineHost.now() }
 
 /// a value behind a lock, readable from any thread.

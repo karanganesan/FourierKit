@@ -56,9 +56,9 @@ public enum FourierError: Error, Sendable, Hashable, LocalizedError, CustomStrin
     public var description: String {
         switch self {
         case .microphoneDenied:
-            "microphone access is off. turn it on in system settings > privacy & security > microphone."
+            "microphone access is off. turn it on in \(DeviceWords.settings) > privacy & security > microphone."
         case .microphoneRestricted:
-            "microphone access is blocked by a device policy. ask the person who manages this mac."
+            "microphone access is blocked by a device policy. ask the person who manages \(DeviceWords.thisDevice)."
         case .microphoneNotRequested:
             "microphone access has not been asked for yet. call requestMicrophone() first."
         case .noMicrophone:
@@ -78,7 +78,7 @@ public enum FourierError: Error, Sendable, Hashable, LocalizedError, CustomStrin
         case .notEnoughDisk(let needed, let available):
             "not enough disk space for the model: \(Self.gigabytes(needed)) needed, \(Self.gigabytes(available)) free. free some space and try again."
         case .offlineModelMissing:
-            "offline mode is on and the model is not on this mac. turn offline mode off once to download it."
+            "offline mode is on and the model is not on \(DeviceWords.thisDevice). turn offline mode off once to download it."
         case .unverifiedRevision(let revision):
             "revision \(revision) has no known checksum. pass its sha256 in model options to use it."
         case .modelInvalid(let reason):

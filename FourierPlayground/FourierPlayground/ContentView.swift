@@ -22,6 +22,10 @@ struct ContentView: View {
         .fourierGlassWindow()
         // no bar behind the toolbar: its buttons float on the window like everything else
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        // in full screen macos moves the toolbar into a strip of its own and paints a bar behind
+        // it that no setting removes. so the toolbar steps aside there and comes down on hover,
+        // and the content runs to the top of the screen.
+        .windowToolbarFullScreenVisibility(.onHover)
         .navigationTitle(navigationTitle)
         .task { await app.state.observe() }
         .onChange(of: app.state.isReady, initial: true) { _, ready in
@@ -407,19 +411,25 @@ private struct PlaygroundToolbar: ToolbarContent {
     }
 }
 
-// MARK: window size, for automation
+// MARK: the window itself
 
-/// sets the window's content size once, when `-fourierWindowSize` asks for it
+/// reaches the window for what swiftui has no modifier for: a title bar with no background of its
+/// own, in a window and in full screen, and the size and full screen that automation asks for.
 private struct WindowSizer: NSViewRepresentable {
     let size: CGSize?
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
-        guard let size else { return view }
         DispatchQueue.main.async {
             guard let window = view.window else { return }
-            window.setContentSize(size)
-            window.center()
+            // the toolbar floats on the window's own surface. without this, full screen paints a bar behind it.
+            window.titlebarAppearsTransparent = true
+            window.titlebarSeparatorStyle = .none
+            if let size {
+                window.setContentSize(size)
+                window.center()
+            }
+            if LaunchOptions.current.fullScreen { window.toggleFullScreen(nil) }
         }
         return view
     }

@@ -46,6 +46,11 @@ actor Runtime {
     /// chips each stage can run on today; the encoder also has a core ml neural engine path
     static let shippedChips: [Stage: Set<Chip>] = [.mel: [.cpu], .encoder: [.gpu, .npu], .decoder: [.gpu], .search: [.cpu]]
 
+    /// the shipped chips this device has: no neural engine pin where core ml lists none, as in the simulator
+    nonisolated static var availableChips: [Stage: Set<Chip>] {
+        DeviceProfile.hasNeuralEngine ? shippedChips : shippedChips.mapValues { $0.subtracting([.npu]) }
+    }
+
     /// what is actually loaded, readable from any thread
     nonisolated let placement = Locked(Runtime.shippedPlacement)
     nonisolated let precision = Locked(Runtime.shippedPrecision)
@@ -148,7 +153,7 @@ actor Runtime {
     }
 
     nonisolated func checkPins(_ compute: ComputeOptions) throws {
-        for (stage, chip) in compute.chips where !(Self.shippedChips[stage] ?? []).contains(chip) {
+        for (stage, chip) in compute.chips where !(Self.availableChips[stage] ?? []).contains(chip) {
             throw FourierError.unsupportedPin(stage: stage, chip: chip)
         }
         let encoderChip = Self.encoderChip(for: compute)
@@ -416,12 +421,24 @@ actor Runtime {
         observers.append(center.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: nil) { _ in
             Task { await Runtime.shared.pressureChanged() }
         })
-        // appkit's did-become-active, by name, so the core never links the ui framework
-        observers.append(center.addObserver(forName: Notification.Name("NSApplicationDidBecomeActiveNotification"), object: nil, queue: nil) { _ in
+        // the app's did-become-active, by name, so this file needs no ui framework
+        observers.append(center.addObserver(forName: Self.didBecomeActive, object: nil, queue: nil) { _ in
             Task { _ = await Runtime.shared.refreshMicrophone() }
         })
+        #if os(iOS)
+        // ios warns apps before it ends them for memory; let go of an idle engine at once
+        observers.append(center.addObserver(forName: Notification.Name("UIApplicationDidReceiveMemoryWarningNotification"), object: nil, queue: nil) { _ in
+            Task { await Runtime.shared.coolIfIdle() }
+        })
+        #endif
         applyPressure()
     }
+
+    #if os(macOS)
+    private static let didBecomeActive = Notification.Name("NSApplicationDidBecomeActiveNotification")
+    #else
+    private static let didBecomeActive = Notification.Name("UIApplicationDidBecomeActiveNotification")
+    #endif
 
     private func memoryPressure(_ event: DispatchSource.MemoryPressureEvent) async {
         memoryWarning = event.contains(.warning) || event.contains(.critical)
@@ -448,8 +465,7 @@ actor Runtime {
             else if memoryWarning { .busy }
             else if ProcessInfo.processInfo.isLowPowerModeEnabled { .lowPower }
             else { .normal }
-        let rows = pressure == .normal ? 12 : 6
-        Task { await host.setMaxRows(rows) }
+        Task { await host.setUnderPressure(pressure != .normal) }
         if state.pressure != pressure {
             state.pressure = pressure
             publish()
@@ -510,6 +526,7 @@ actor Runtime {
         metrics.weightMemory = snapshot.weightBytes
         metrics.cacheMemory = snapshot.cacheBytes
         metrics.workload = workload()
+        metrics.device = snapshot.device
         return metrics
     }
 
