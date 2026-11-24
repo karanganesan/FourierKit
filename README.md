@@ -7,7 +7,7 @@ this repo has two parts.
 - `FourierKit` is the sdk. one import, three modes, every option exposed and defaulted. `FourierKitUI` is an optional second import with default swiftui views.
 - `FourierPlayground` is a swiftui app for mac, iphone and ipad that uses the sdk to try all three modes and every setting.
 
-status: the engine, the sdk, the default ui, the app and the golden test work on the m4 mac they were built on. on an iphone 17 pro the three golden clips gave the reference text. what has not been checked is listed under [not verified](#not-verified). see [CHANGELOG.md](CHANGELOG.md).
+status: the engine, the sdk, the default ui, the app and the golden test work on the m4 mac they were built on. on an iphone 17 pro the three golden clips give the same token ids and candidate scores as the mac and the reference. what has not been checked is listed under [not verified](#not-verified). see [CHANGELOG.md](CHANGELOG.md).
 
 ## what exact means here
 
@@ -107,7 +107,7 @@ Task { for await update in job.updates { print(update.settled, update.draft) } }
 let transcript = try await job.result
 ```
 
-the full api, with every option and its default, is in [docs/api.html](docs/api.html).
+the full api, with every option and its default, is in [the api page](https://karanganesan.github.io/FourierKit/api.html).
 
 ## the golden test
 
@@ -115,41 +115,43 @@ the full api, with every option and its default, is in [docs/api.html](docs/api.
 ./scripts/golden.sh "what this run changed"
 ```
 
-the test needs the model prepared and the golden tensors in `golden/tensors/`, which are not in git. there is no published release of them yet, so a clean clone has to remake them first. both steps are in [CONTRIBUTING.md](CONTRIBUTING.md).
+the test needs the model prepared and the golden tensors in `golden/tensors/`, which are not in git. `scripts/fetch-golden.sh` downloads them from the `golden-v1` release and checks their hashes. both steps are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## results
 
-every golden run appends one line to `docs/performance.jsonl`, passed or failed. [docs/performance.html](docs/performance.html) is built from that log and holds the scoreboard, the baselines, the climb over runs, every try and the method.
+every golden run appends one line to `docs/performance.jsonl`, passed or failed. [the performance page](https://karanganesan.github.io/FourierKit/performance.html) is built from that log and holds the scoreboard, the baselines, the climb over runs, every try and the method.
 
-the newest passing line is labelled "final: review fixes, live text follows" (2026-11-24). it ran on a fanless m4 macbook air with 32 gb, in thermal state 1 (fair). per-clip speed is the median of four warm runs after one cold run.
+the newest passing line is labelled "0.0.4 as released: check before the repo goes public" (2026-11-24, 23:50 utc). it ran on a fanless m4 macbook air with 32 gb, in thermal state 1 (fair). per-clip speed is the median of four warm runs after one cold run.
 
 | clip | audio | fourierkit, x realtime | transformers, x realtime | time to first text |
 |---|---|---|---|---|
-| short | 3.7 s | 4.34 | 1.10 | 0.30 s |
-| medium | 11.2 s | 6.36 | 1.18 | 0.44 s |
-| long | 116.5 s | 6.73 | 0.81 | 3.03 s |
+| short | 3.7 s | 3.92 | 1.10 | 0.34 s |
+| medium | 11.2 s | 5.66 | 1.18 | 0.50 s |
+| long | 116.5 s | 6.53 | 0.81 | 3.12 s |
 
-- in the same run: the three clips together in one batch ran at 7.19x realtime in total, and the three clips three times over (sustained) at 11.33x. peak memory was 3.73 gb.
-- the decoder ran 19.9 to 21.8 steps per second. reading the weights alone caps it near 26.
-- runs vary a lot. across the eight passing runs from 05:21 to 09:10 that day, all in thermal state 1, single-clip speed ranged 3.35x to 4.34x (short), 4.69x to 6.36x (medium) and 5.66x to 6.73x (long), and sustained throughput 4.31x to 11.33x. the code changed between those runs and some were labelled as sharing the machine, so the spread mixes both. no controlled hot against cool comparison has been run.
+- in the same run: the three clips together in one batch ran at 6.88x realtime in total, and the three clips three times over (sustained) at 7.73x. peak memory was 3.74 gb.
+- the decoder ran 19.4 to 20.4 steps per second. reading the weights alone caps it near 26.
+- runs vary a lot. across the nine passing runs from 05:21 to 23:50 utc that day, all in thermal state 1, single-clip speed ranged 3.35x to 4.34x (short), 4.69x to 6.36x (medium) and 5.66x to 6.73x (long), and sustained throughput 4.31x to 11.33x. the code changed between those runs and some were labelled as sharing the machine, so the spread mixes both. the newest run is the same engine as the 09:10 run, which gave 4.34x, 6.36x and 6.73x and 11.33x sustained, so the gap between them is heat and what else the machine was doing. no controlled hot against cool comparison has been run.
 - many files at once: twelve 11-second clips at 12 rows ran at 11.0x to 12.7x realtime in total over six runs in one try (see `docs/tries.jsonl`). clips of mixed length gain less.
-- played in live at real speed (the newest modes line), first text came after 0.77 s (short), 0.79 s (medium) and 0.48 s (long). in a separate try, text then grew token by token, with a new update every 50 to 70 ms at the median.
+- played in live at real speed (the newest modes line), first text came after 0.79 s (short), 0.78 s (medium) and 0.51 s (long). in a separate try, text then grew token by token, with a new update every 50 to 70 ms at the median.
 - the transformers column is one instrumented cpu run per clip recorded in `golden/manifest.json` (`reference_seconds`), with extra top-k, scores and logits, and the first call's warm-up. it is not a plain warm run.
-- an iphone 17 pro gave the reference text on all three clips at 2.9x, 3.9x and 4.3x realtime (short, medium, long) from fresh launches. this was measured before today's engine changes, and checked by text equality only, not by the golden test.
+- an iphone 17 pro (a19 pro, 12 gb) ran the three clips at 2.45x, 3.37x and 3.51x realtime (short, medium, long) over six rounds back to back, on the 0.0.4 engine. the hashes of the token ids and of the ten candidate scores per step equal the mac's and the reference. this came from a benchmark build of the app, not from the golden test, which has not run on a phone. the phone reaches serious heat after about four minutes. see [HILLCLIMB.md](HILLCLIMB.md).
 
 the encoder also has a neural engine path, about 3x faster than the gpu on two minutes of audio, but its 16-bit math uses 35 to 44 times the safety margin. it runs only if you pin it, and it is outside the exactness claim.
 
 ## not verified
 
-- on an iphone or ipad: the microphone, listen and record, the first-run 4 gb download, and the token-level golden test.
+- on an iphone or ipad: the microphone, listen and record, the first-run 4 gb download, and the golden test itself. its bit-identity checks across batch widths and its margin checks have not run there. token ids and candidate scores on the three clips have been compared, as above.
 - anywhere: voice processing on a real input with noise, voiceover, energy use, and an instruments trace of where work ran.
 
 ## docs
 
-- [docs/plan.html](docs/plan.html): goals, rules, how we work, phases, and what changed from the plan
-- [docs/architecture.html](docs/architecture.html): which chip runs each step, where bits are fixed and how work is packed
-- [docs/api.html](docs/api.html): the public api with examples
-- [docs/performance.html](docs/performance.html): the measurement log, baselines, tries and method
+the docs are single-file html in `docs/`, served by github pages.
+
+- [plan](https://karanganesan.github.io/FourierKit/plan.html): goals, rules, how we work, phases, and what changed from the plan
+- [architecture](https://karanganesan.github.io/FourierKit/architecture.html): which chip runs each step, where bits are fixed and how work is packed
+- [api](https://karanganesan.github.io/FourierKit/api.html): the public api with examples
+- [performance](https://karanganesan.github.io/FourierKit/performance.html): the measurement log, baselines, tries and method
 
 ## license
 

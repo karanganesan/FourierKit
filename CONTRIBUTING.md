@@ -1,6 +1,6 @@
 # contributing
 
-this project is built by hill-climbing: one change, one score, keep it or drop it. the golden test is the only automated check. read [docs/plan.html](docs/plan.html) (`rules`, `how we work`, `accuracy`) before you change the engine.
+this project is built by hill-climbing: one change, one score, keep it or drop it. the golden test is the only automated check. read [the plan](https://karanganesan.github.io/FourierKit/plan.html) (`rules`, `how we work`, `accuracy`) before you change the engine.
 
 ## build
 
@@ -44,7 +44,13 @@ run that from a scratch package, a playground or `FourierPlayground`. a folder y
 
 the golden test compares against frozen tensors in `golden/tensors/`. they are large, so git ignores them. the clips (`golden/clips/`) and `golden/manifest.json` are in git, and the manifest holds the sha256 of each clip file (`file_sha256`), of its decoded samples (`samples_sha256`) and of each tensor file (`tensors_sha256`).
 
-there is no published release of the tensors yet. `scripts/fetch-golden.sh` downloads them from a github release named `golden-v1` and checks their hashes, but that release does not exist, so the script fails for now. until it does, a clean clone has to remake them:
+fetch them from the github release named `golden-v1`. the script needs the `gh` cli, and checks each file's hash against the manifest:
+
+```sh
+scripts/fetch-golden.sh
+```
+
+to remake them from the reference instead:
 
 ```sh
 scripts/make-golden.sh
