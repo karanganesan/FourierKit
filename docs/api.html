@@ -248,8 +248,8 @@ td .sig, th .sig { white-space: nowrap; }
 <main class="prose">
 <h1>the fourierkit api</h1>
 <p class="lead">three modes, every option public, one line to start. <code>import FourierKit</code>, and call <code>Fourier()</code>.</p>
-<p class="status">the engine, the sdk and the default ui exist. the golden test checks the engine directly and these calls for a file, a recording and live replay.</p>
-<nav class="toc" aria-label="on this page"><a href="#start">start here</a><a href="#transcribe">transcribe</a><a href="#record">record</a><a href="#listen">listen</a><a href="#prepare-progress">prepare progress</a><a href="#state">state and metrics</a><a href="#microphone">microphone</a><a href="#options">options</a><a href="#parts">replaceable parts</a><a href="#errors">errors</a><a href="#ui">default ui</a><a href="#exactness">exactness</a></nav>
+<p class="status">matches the public declarations in Sources/FourierKit/Speech and Sources/FourierKitUI as of 2026-11-24. the golden test checks the engine directly, and these calls for a file, a recording and live replay.</p>
+<nav class="toc" aria-label="on this page"><a href="#start">start here</a><a href="#listen">listen</a><a href="#record">record</a><a href="#transcribe">transcribe</a><a href="#prepare-progress">prepare progress</a><a href="#state">state and metrics</a><a href="#microphone">microphone</a><a href="#options">options</a><a href="#parts">replaceable parts</a><a href="#errors">errors</a><a href="#ui">default ui</a><a href="#exactness">exactness</a></nav>
 <section aria-labelledby="start">
 <h2 id="start">start here</h2>
 <p class="dim">one line gives the best result. every option has a default, and every default is the exact path.</p>
@@ -260,6 +260,9 @@ try await speech.prepare()                              // optional: every mode 
 
 let transcript = try await speech.transcribe(contentsOf: url)
 print(transcript.text)</code></pre>
+<p class="dim">add the package by its url. use the main branch for now: the newest tag, 0.0.2, is older than some calls on this page (<code>TranscriptionJob.updates</code>, <code>Recorder.drafts</code>, <code>TranscriptPiece.isExact</code>, <code>ComputeOptions.resolvedPlacement</code>). pin a tag once one includes them. the package supports macos 26 and ios and ipados 26 on apple silicon.</p>
+<pre><code>// Package.swift
+.package(url: "https://github.com/karanganesan/FourierKit.git", branch: "main")</code></pre>
 <p class="dim"><code>Fourier</code> is a final class and is <code>Sendable</code>. it is safe to call from the main actor: every heavy call is async and leaves the caller's actor at once, and streams are produced off the main actor and coalesced to at most one value per frame. there is one engine per process, so every <code>Fourier</code> instance shares the same weights.</p>
 <div class="table-wrap" tabindex="0" role="region" aria-label="signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
 <tr><th scope="row" class="mono"><code>init(_ options: FourierOptions = FourierOptions())</code></th><td>the default is the recommended setup. see the options reference.</td></tr>
@@ -267,110 +270,13 @@ print(transcript.text)</code></pre>
 <tr><th scope="row" class="mono"><code>func prepare() async throws</code></th><td>downloads, verifies, loads and warms the model. optional. calling it again joins the same run, and the work stops only when the last waiting caller cancels. a model that is already ready finishes at once.</td></tr>
 <tr><th scope="row" class="mono"><code>var prepareProgress: AsyncStream&lt;PrepareProgress&gt;</code></th><td>one smooth value from 0 to 1 for the current or next prepare run. see prepare progress.</td></tr>
 <tr><th scope="row" class="mono"><code>func warm() async throws</code></th><td>applies the keep-warm option, then does the same as prepare().</td></tr>
+<tr><th scope="row" class="mono"><code>static let version: String</code></th><td>the sdk's version, <code>"0.0.2"</code>. the package is versioned by its git tag, which matches this.</td></tr>
 <tr><th scope="row" class="mono"><code>func cool() async</code></th><td>lets go of the model's memory if nothing is running. the next use warms it again.</td></tr>
-</tbody></table></div>
-</section>
-<section aria-labelledby="transcribe">
-<h2 id="transcribe">transcribe</h2>
-<p class="dim">audio up to 120 s runs in one pass and is never split, so it matches the reference path. longer audio is cut at quiet points by one deterministic splitter, each piece runs the exact path and the pieces are joined with single spaces. if a piece reaches the token limit without a stop token, it is split and decoded again, so text is never silently cut off. file decoding and resampling to 16 khz happen inside the kit. files and recordings are never cleaned.</p>
-<div class="table-wrap" tabindex="0" role="region" aria-label="transcribe signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
-<tr><th scope="row" class="mono"><code>func transcribe(contentsOf url: URL) async throws -&gt; Transcript</code></th><td>any file core audio can open</td></tr>
-<tr><th scope="row" class="mono"><code>func transcribe(_ recording: Recording) async throws -&gt; Transcript</code></th><td>the result of record()</td></tr>
-<tr><th scope="row" class="mono"><code>func transcribe(samples: [Float], sampleRate: Double = 16_000) async throws -&gt; Transcript</code></th><td>mono samples at any rate, resampled to 16 khz if needed</td></tr>
-<tr><th scope="row" class="mono"><code>func transcriptionJob(contentsOf url: URL) -&gt; TranscriptionJob</code></th><td>starts the same work and returns a handle with its own progress, result and cancel</td></tr>
-<tr><th scope="row" class="mono"><code>func transcriptionJob(_ recording: Recording) -&gt; TranscriptionJob</code></th><td>the same, for a recording</td></tr>
-<tr><th scope="row" class="mono"><code>func transcriptionJob(samples: [Float], sampleRate: Double = 16_000) -&gt; TranscriptionJob</code></th><td>the same, for samples</td></tr>
-</tbody></table></div>
-<p class="dim">cancelling the task that is awaiting one of the transcribe calls cancels the work. a job handle is different: cancelling a task that awaits <code>job.result</code> does not cancel the job. only <code>job.cancel()</code> does.</p>
-<pre><code>let samples: [Float] = []   // your own 16 khz mono audio
-let text = try await speech.transcribe(samples: samples).text
-let other = try await speech.transcribe(samples: samples, sampleRate: 48_000).text</code></pre>
-<h3 style="margin-top:32px">the job handle</h3>
-<pre><code>let job = speech.transcriptionJob(contentsOf: url)
-let watching = Task {
-    for await fraction in job.progress { print(fraction) }   // 0...1, ends with the job
-}
-let reading = Task {
-    for await update in job.updates {                        // text while it is worked out
-        print(update.settled, update.draft)                  // settled never changes, draft may
-    }
-}
-// job.cancel() stops at the next piece boundary, and result then throws FourierError.cancelled
-let transcript = try await job.result                        // the one to keep
-await watching.value
-await reading.value</code></pre>
-<p class="dim">progress moves through the whole job, also when the audio is one piece: a little for the encoder, a little for the prefill, then step by step against an estimate of how many words that much audio holds. <code>updates</code> carries the text so far: pieces that are finished, from the start of the audio, are <code>settled</code>, and what the engine has after that is <code>draft</code>. with beam search, the default, a draft can be rewritten before its piece ends. neither changes the transcript, which comes from <code>result</code>.</p>
-<div class="table-wrap" tabindex="0" role="region" aria-label="transcription job members"><table><thead><tr><th scope="col">member</th><th scope="col">what it does</th></tr></thead><tbody>
-<tr><th scope="row" class="mono"><code>let id: UUID</code></th><td>the same id the job has in <code>FourierState.jobs</code></td></tr>
-<tr><th scope="row" class="mono"><code>var progress: AsyncStream&lt;Double&gt;</code></th><td>fraction of the audio done, 0 to 1, newest value only. ends when the job ends.</td></tr>
-<tr><th scope="row" class="mono"><code>var fraction: Double</code></th><td>the latest fraction done</td></tr>
-<tr><th scope="row" class="mono"><code>var updates: AsyncStream&lt;TranscriptionUpdate&gt;</code></th><td>the text so far, newest value only: <code>settled</code>, <code>draft</code> and <code>text</code>. ends when the job ends.</td></tr>
-<tr><th scope="row" class="mono"><code>var latestUpdate: TranscriptionUpdate?</code></th><td>the newest update, nil before any text</td></tr>
-<tr><th scope="row" class="mono"><code>var result: Transcript { get async throws }</code></th><td>waits for the transcript. errors are <code>FourierError</code> values.</td></tr>
-<tr><th scope="row" class="mono"><code>func cancel()</code></th><td>stops at the next piece boundary</td></tr>
-</tbody></table></div>
-<h3 style="margin-top:32px">the result</h3>
-<div class="table-wrap" tabindex="0" role="region" aria-label="transcript"><table><thead><tr><th scope="col">type and member</th><th scope="col">what it holds</th></tr></thead><tbody>
-<tr><th scope="row" class="mono"><code>Transcript.text: String</code></th><td>the model's exact text, pieces joined with single spaces</td></tr>
-<tr><th scope="row" class="mono"><code>Transcript.language: String</code></th><td>the language the model was asked for, as a resolved name such as english</td></tr>
-<tr><th scope="row" class="mono"><code>Transcript.pieces: [TranscriptPiece]</code></th><td>pieces or phrases in order, each with its audio range</td></tr>
-<tr><th scope="row" class="mono"><code>Transcript.duration: Duration</code></th><td>length of the audio</td></tr>
-<tr><th scope="row" class="mono"><code>Transcript.metrics: TranscriptMetrics</code></th><td>see below</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptPiece.text: String</code></th><td>the piece's text</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptPiece.start, end: Duration</code></th><td>the audio range of the piece</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptPiece.samples: Range&lt;Int&gt;</code></th><td>the same range as 16 khz sample indices</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptPiece.reachedStop: Bool</code></th><td>false if the piece hit the token limit and could not be split further</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptMetrics.realtimeSpeed: Double</code></th><td>audio seconds per wall second, from the call to the result</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptMetrics.timeToFirstText: Duration?</code></th><td>from the call to the first decoded token</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptMetrics.elapsed: Duration</code></th><td>wall time</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptMetrics.tokens: Int, decoderSteps: Int</code></th><td>tokens generated without the prompt, and decoder steps</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptMetrics.placement: [Stage: Chip]</code></th><td>the planned chip for each stage</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptMetrics.precision: [Stage: Precision]</code></th><td>the precision for each stage</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptMetrics.widestBatch: Int</code></th><td>the widest decoder batch used</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptMetrics.tokenLimitSplits: Int</code></th><td>pieces decoded again after hitting the token limit</td></tr>
-<tr><th scope="row" class="mono"><code>TranscriptMetrics.melTime, encodeTime, prefillTime, decodeTime: Duration</code></th><td>time in each stage, summed over pieces</td></tr>
-</tbody></table></div>
-</section>
-<section aria-labelledby="record">
-<h2 id="record">record</h2>
-<p class="dim">raw capture with a live level, then the same path as transcribe. recorded audio is not cleaned: no noise suppression, no echo cancellation and no gain, so it can match the reference. the first call asks for the microphone as <code>options.permissions</code> allows. the engine warms while you record, so the transcript can start at once. a warm-up never starts a download.</p>
-<pre><code>let recorder = try await speech.record()
-let meter = Task {
-    for await level in recorder.levels { print(level) }   // 0 (silence) to 1 (full scale)
-}
-let reading = Task {
-    for await update in recorder.drafts {                 // draft text while recording
-        print(update.settled, update.draft)
-    }
-}
-// ... later
-let recording = await recorder.stop()
-await meter.value
-await reading.value
-let transcript = try await speech.transcribe(recording)  // one exact pass, the one to keep</code></pre>
-<p class="dim">while recording, quick greedy passes run over the raw audio so far and arrive on <code>drafts</code>. a stretch longer than 20 s is cut at a quiet point and set aside as <code>settled</code>, so a pass never grows with the recording. the drafts are not the transcript: that comes from <code>transcribe</code> on the recording and may word things differently. set <code>options.recordDrafts = false</code> to record without them. they need the model on the device, and recording never starts a download for them.</p>
-<div class="table-wrap" tabindex="0" role="region" aria-label="record signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
-<tr><th scope="row" class="mono"><code>func record() async throws -&gt; Recorder</code></th><td>starts capture from <code>options.audioSource</code>, the system microphone by default</td></tr>
-<tr><th scope="row" class="mono"><code>Recorder.id: UUID</code></th><td>the job id in <code>FourierState.jobs</code></td></tr>
-<tr><th scope="row" class="mono"><code>Recorder.levels: AsyncStream&lt;Float&gt;</code></th><td>input loudness for a meter, 0 to 1, newest value only. ends when recording stops.</td></tr>
-<tr><th scope="row" class="mono"><code>Recorder.level: Float</code></th><td>the newest level</td></tr>
-<tr><th scope="row" class="mono"><code>Recorder.drafts: AsyncStream&lt;TranscriptionUpdate&gt;</code></th><td>draft text for what has been heard so far, newest value only. ends when recording stops.</td></tr>
-<tr><th scope="row" class="mono"><code>Recorder.latestDraft: TranscriptionUpdate?</code></th><td>the newest draft, nil before any text</td></tr>
-<tr><th scope="row" class="mono"><code>Recorder.duration: Duration</code></th><td>audio captured so far</td></tr>
-<tr><th scope="row" class="mono"><code>Recorder.startedAt: Date</code></th><td>when capture began</td></tr>
-<tr><th scope="row" class="mono"><code>func stop() async -&gt; Recording</code></th><td>stops capture and returns everything recorded. calling it again returns the same recording.</td></tr>
-<tr><th scope="row" class="mono"><code>func cancel() async</code></th><td>stops capture and throws the audio away</td></tr>
-<tr><th scope="row" class="mono"><code>Recording.samples: [Float]</code></th><td>16 khz mono audio, untouched</td></tr>
-<tr><th scope="row" class="mono"><code>Recording.duration: Duration</code></th><td>length of the audio</td></tr>
-<tr><th scope="row" class="mono"><code>Recording.droppedSamples: Int</code></th><td>samples lost because the reader fell behind, normally 0</td></tr>
-<tr><th scope="row" class="mono"><code>Recording.startedAt: Date</code></th><td>when capture began</td></tr>
-<tr><th scope="row" class="mono"><code>Recording.sampleRate: Double</code></th><td>static, 16000</td></tr>
-<tr><th scope="row" class="mono"><code>Recording.init(samples:startedAt:droppedSamples:)</code></th><td>make your own, with <code>startedAt</code> defaulting to now and <code>droppedSamples</code> to 0</td></tr>
 </tbody></table></div>
 </section>
 <section aria-labelledby="listen">
 <h2 id="listen">listen</h2>
-<p class="dim">live text while you speak. the model is not a streaming model, so live text is built on top of it: finished audio blocks are encoded once and cached, only the newest audio is encoded on each short step, and text that agrees across passes settles. a pause ends a phrase, settles all of it and resets the window, so the cost stays flat in a long session. the first call asks for the microphone and prepares the model if needed.</p>
+<p class="dim">live text while you speak. the model is not a streaming model, so live text is built on top of it. a phrase opens when speech starts. while it is open, a quick greedy pass runs over its audio at each update interval, with the phrase's settled tokens as the start, so only the tail is generated, and tokens arrive on screen one by one as the pass makes them. each pass encodes the phrase's audio again. text that agrees across passes settles. a pause ends a phrase, settles all of it and starts a new one, so a pass never grows with the length of the session. the first call asks for the microphone and prepares the model if needed.</p>
 <pre><code>let live = try await speech.listen()
 
 let reading = Task {
@@ -402,7 +308,7 @@ try await reading.value
 <tr><th scope="row" class="mono"><code>var latestUpdate: LiveUpdate? { get async }</code></th><td>the newest update, nil before any text</td></tr>
 </tbody></table></div>
 <h3 style="margin-top:32px">promises the api makes</h3>
-<ul class="prose" style="margin:16px 0 0;padding-left:24px;max-width:720px"><li><strong>settled text never changes.</strong> it only grows.</li><li><strong>draft text can change or vanish</strong> on any update. it is always the newest guess for the audio after the settled part.</li><li><strong>drafts are optional.</strong> with drafts off, or when nothing is uncertain, the draft is empty and only settled text arrives.</li><li><strong>settled plus draft</strong> is always the best full text so far.</li><li><strong>the transcript from finish() comes from the exact passes.</strong> its wording can differ from the live text, and it is the one to save.</li><li><strong>levels and updates keep only the newest.</strong> a slow reader gets the newest value, and memory stays bounded. the other events queue in order.</li><li><strong>cancelling the task that reads events does not stop the session.</strong> only <code>finish()</code> or <code>cancel()</code> does.</li><li><strong>if the mac falls behind, updates slow down before any audio is dropped,</strong> and a warning says so.</li></ul>
+<ul class="prose" style="margin:16px 0 0;padding-left:24px;max-width:720px"><li><strong>settled text never changes.</strong> it only grows.</li><li><strong>draft text can change or vanish</strong> on any update. it is always the newest guess for the audio after the settled part.</li><li><strong>drafts are optional.</strong> with drafts off, or when nothing is uncertain, the draft is empty and only settled text arrives.</li><li><strong>settled plus draft</strong> is always the best full text so far.</li><li><strong>the transcript from finish() comes from the exact passes.</strong> its wording can differ from the live text, and it is the one to save.</li><li><strong>levels and updates keep only the newest.</strong> a slow reader gets the newest value, and memory stays bounded. the other events queue in order.</li><li><strong>cancelling the task that reads events does not stop the session.</strong> only <code>finish()</code>, <code>cancel()</code> or letting go of the session does.</li><li><strong>keep the session while it runs.</strong> when the last reference to it goes away without <code>finish()</code> or <code>cancel()</code>, it is cancelled, the input stops and <code>events</code> ends. a reading task that holds only <code>live.events</code> does not keep it alive.</li><li><strong>a phrase whose exact pass fails is tried once more.</strong> if it fails again, its settled live text stands in, and that piece has <code>isExact == false</code>.</li><li><strong>if the device falls behind, updates slow down before any audio is dropped,</strong> and a warning says so.</li></ul>
 <h3 style="margin-top:32px">events</h3>
 <div class="table-wrap" tabindex="0" role="region" aria-label="live events"><table><thead><tr><th scope="col">case</th><th scope="col">meaning</th></tr></thead><tbody>
 <tr><th scope="row" class="mono"><code>started</code></th><td>the input is live</td></tr>
@@ -452,6 +358,108 @@ listenOptions.audioSource = FileAudioSource(url: url, realtime: true)
 let live = try await speech.listen(listenOptions)   // no microphone, no permission prompt</code></pre>
 <p class="dim">the final transcript is one exact pass per phrase, started as soon as the phrase closes, so <code>finish()</code> only waits for the last phrase. with <code>finalPass = .fullAudio</code> it is one pass over everything heard, which is slower to finish.</p>
 </section>
+<section aria-labelledby="record">
+<h2 id="record">record</h2>
+<p class="dim">raw capture with a live level, then the same path as transcribe. recorded audio is not cleaned: no noise suppression, no echo cancellation and no gain, so it can match the reference. the first call asks for the microphone as <code>options.permissions</code> allows. the engine warms while you record, so the transcript can start at once. a warm-up never starts a download.</p>
+<pre><code>let recorder = try await speech.record()
+let meter = Task {
+    for await level in recorder.levels { print(level) }   // 0 (silence) to 1 (full scale)
+}
+let reading = Task {
+    for await update in recorder.drafts {                 // draft text while recording
+        print(update.settled, update.draft)
+    }
+}
+// ... later
+let recording = await recorder.stop()
+await meter.value
+await reading.value
+let transcript = try await speech.transcribe(recording)  // one exact pass, the one to keep</code></pre>
+<p class="dim">while recording, quick greedy passes run over the raw audio so far and arrive on <code>drafts</code>. a stretch longer than 20 s is cut at a quiet point and set aside as <code>settled</code>, so a pass never grows with the recording. the drafts are not the transcript: that comes from <code>transcribe</code> on the recording and may word things differently. set <code>options.recordDrafts = false</code> to record without them. they need the model on the device, and recording never starts a download for them.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="record signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>func record() async throws -&gt; Recorder</code></th><td>starts capture from <code>options.audioSource</code>, the system microphone by default</td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.id: UUID</code></th><td>the job id in <code>FourierState.jobs</code></td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.levels: AsyncStream&lt;Float&gt;</code></th><td>input loudness for a meter, 0 to 1, newest value only. ends when recording stops.</td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.level: Float</code></th><td>the newest level</td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.drafts: AsyncStream&lt;TranscriptionUpdate&gt;</code></th><td>draft text for what has been heard so far, newest value only. ends when recording stops.</td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.latestDraft: TranscriptionUpdate?</code></th><td>the newest draft, nil before any text</td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.duration: Duration</code></th><td>audio captured so far</td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.startedAt: Date</code></th><td>when capture began</td></tr>
+<tr><th scope="row" class="mono"><code>func stop() async -&gt; Recording</code></th><td>stops capture and returns everything recorded. calling it again returns the same recording.</td></tr>
+<tr><th scope="row" class="mono"><code>func cancel() async</code></th><td>stops capture and throws the audio away</td></tr>
+<tr><th scope="row" class="mono">dropping the recorder</th><td>a recorder let go without <code>stop()</code> or <code>cancel()</code> stops capture and ends its job. the audio is lost.</td></tr>
+<tr><th scope="row" class="mono"><code>Recording.samples: [Float]</code></th><td>16 khz mono audio, untouched</td></tr>
+<tr><th scope="row" class="mono"><code>Recording.duration: Duration</code></th><td>length of the audio</td></tr>
+<tr><th scope="row" class="mono"><code>Recording.droppedSamples: Int</code></th><td>samples lost because the reader fell behind, normally 0</td></tr>
+<tr><th scope="row" class="mono"><code>Recording.startedAt: Date</code></th><td>when capture began</td></tr>
+<tr><th scope="row" class="mono"><code>Recording.sampleRate: Double</code></th><td>static, 16000</td></tr>
+<tr><th scope="row" class="mono"><code>Recording.init(samples:startedAt:droppedSamples:)</code></th><td>make your own, with <code>startedAt</code> defaulting to now and <code>droppedSamples</code> to 0</td></tr>
+</tbody></table></div>
+</section>
+<section aria-labelledby="transcribe">
+<h2 id="transcribe">transcribe</h2>
+<p class="dim">audio up to 120 s runs in one pass and is never split, so it matches the reference path. longer audio is cut at quiet points by one deterministic splitter, each piece runs the exact path and the pieces are joined with single spaces. if a piece reaches the checkpoint's token limit (512) without a stop token, it is split at a quiet point and decoded again, so text is never silently cut off. a <code>maxTokens</code> you set is a cap instead: the piece stops there and is not split. a piece whose gpu call fails runs once more before the call throws. file decoding and resampling to 16 khz happen inside the kit. files and recordings are never cleaned.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="transcribe signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>func transcribe(contentsOf url: URL) async throws -&gt; Transcript</code></th><td>any file core audio can open</td></tr>
+<tr><th scope="row" class="mono"><code>func transcribe(_ recording: Recording) async throws -&gt; Transcript</code></th><td>the result of record()</td></tr>
+<tr><th scope="row" class="mono"><code>func transcribe(samples: [Float], sampleRate: Double = 16_000) async throws -&gt; Transcript</code></th><td>mono samples at any rate, resampled to 16 khz if needed</td></tr>
+<tr><th scope="row" class="mono"><code>func transcriptionJob(contentsOf url: URL) -&gt; TranscriptionJob</code></th><td>starts the same work and returns a handle with its own progress, result and cancel</td></tr>
+<tr><th scope="row" class="mono"><code>func transcriptionJob(_ recording: Recording) -&gt; TranscriptionJob</code></th><td>the same, for a recording</td></tr>
+<tr><th scope="row" class="mono"><code>func transcriptionJob(samples: [Float], sampleRate: Double = 16_000) -&gt; TranscriptionJob</code></th><td>the same, for samples</td></tr>
+</tbody></table></div>
+<p class="dim">cancelling the task that is awaiting one of the transcribe calls cancels the work. a job handle is different: cancelling a task that awaits <code>job.result</code> does not cancel the job. only <code>job.cancel()</code> does.</p>
+<pre><code>let samples: [Float] = []   // your own 16 khz mono audio
+let text = try await speech.transcribe(samples: samples).text
+let other = try await speech.transcribe(samples: samples, sampleRate: 48_000).text</code></pre>
+<h3 style="margin-top:32px">the job handle</h3>
+<pre><code>let job = speech.transcriptionJob(contentsOf: url)
+let watching = Task {
+    for await fraction in job.progress { print(fraction) }   // 0...1, ends with the job
+}
+let reading = Task {
+    for await update in job.updates {                        // text while it is worked out
+        print(update.settled, update.draft)                  // settled never changes, draft may
+    }
+}
+// job.cancel() stops at the next piece boundary, and result then throws FourierError.cancelled
+let transcript = try await job.result                        // the one to keep
+await watching.value
+await reading.value</code></pre>
+<p class="dim">progress moves through the whole job, also when the audio is one piece: a little for the encoder, a little for the prefill, then step by step against an estimate of how many words that much audio holds. <code>updates</code> carries the text so far: pieces that are finished, from the start of the audio, are <code>settled</code>, and what the engine has after that is <code>draft</code>. with beam search, the default, a draft can be rewritten before its piece ends. neither changes the transcript, which comes from <code>result</code>.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="transcription job members"><table><thead><tr><th scope="col">member</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>let id: UUID</code></th><td>the same id the job has in <code>FourierState.jobs</code></td></tr>
+<tr><th scope="row" class="mono"><code>var progress: AsyncStream&lt;Double&gt;</code></th><td>fraction of the audio done, 0 to 1, newest value only. ends when the job ends.</td></tr>
+<tr><th scope="row" class="mono"><code>var fraction: Double</code></th><td>the latest fraction done</td></tr>
+<tr><th scope="row" class="mono"><code>var updates: AsyncStream&lt;TranscriptionUpdate&gt;</code></th><td>the text so far, newest value only: <code>settled</code>, <code>draft</code> and <code>text</code>. ends when the job ends.</td></tr>
+<tr><th scope="row" class="mono"><code>var latestUpdate: TranscriptionUpdate?</code></th><td>the newest update, nil before any text</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptionUpdate.settled, draft: String</code></th><td>text of the finished pieces from the start of the audio, which only grows, and what the engine has after that, which can change or be empty</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptionUpdate.text: String</code></th><td>settled plus draft, joined with a space</td></tr>
+<tr><th scope="row" class="mono"><code>var result: Transcript { get async throws }</code></th><td>waits for the transcript. errors are <code>FourierError</code> values.</td></tr>
+<tr><th scope="row" class="mono"><code>func cancel()</code></th><td>stops at the next piece boundary</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px">the result</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="transcript"><table><thead><tr><th scope="col">type and member</th><th scope="col">what it holds</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>Transcript.text: String</code></th><td>the model's exact text, pieces joined with single spaces</td></tr>
+<tr><th scope="row" class="mono"><code>Transcript.language: String</code></th><td>the language the model was asked for, as a resolved name such as english</td></tr>
+<tr><th scope="row" class="mono"><code>Transcript.pieces: [TranscriptPiece]</code></th><td>pieces or phrases in order, each with its audio range</td></tr>
+<tr><th scope="row" class="mono"><code>Transcript.duration: Duration</code></th><td>length of the audio</td></tr>
+<tr><th scope="row" class="mono"><code>Transcript.metrics: TranscriptMetrics</code></th><td>see below</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptPiece.text: String</code></th><td>the piece's text</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptPiece.start, end: Duration</code></th><td>the audio range of the piece</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptPiece.samples: Range&lt;Int&gt;</code></th><td>the same range as 16 khz sample indices</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptPiece.reachedStop: Bool</code></th><td>false if the piece ended without a stop token: it hit a <code>maxTokens</code> you set, or the checkpoint's limit and could not be split further, or it is live text standing in</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptPiece.isExact: Bool</code></th><td>false only in a live session, when a phrase's exact pass failed twice and its settled live text stands in. always true for files and recordings, which throw instead.</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.realtimeSpeed: Double</code></th><td>audio seconds per wall second, from when the engine was ready and the audio read to the result, so a cold first call's prepare or download is not counted. in a live session, where audio arrives in real time, it is the audio decoded over the time the engine worked on it.</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.timeToFirstText: Duration?</code></th><td>from when the engine was ready and the audio read to the first decoded token. in a live session, from the start of the session.</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.elapsed: Duration</code></th><td>the whole call, prepare included</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.tokens: Int, decoderSteps: Int</code></th><td>tokens generated without the prompt, and decoder steps</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.placement: [Stage: Chip]</code></th><td>the chip each stage was set up to run on when the transcript was made. it is the loaded configuration, not a measurement of where the work ran.</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.precision: [Stage: Precision]</code></th><td>the precision each stage was set up to run in, the same way</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.widestBatch: Int</code></th><td>the widest decoder batch used</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.tokenLimitSplits: Int</code></th><td>how many times a piece that hit the checkpoint's token limit was split in two and decoded again. a <code>maxTokens</code> you set never splits.</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.melTime, encodeTime, prefillTime, decodeTime: Duration</code></th><td>time in each stage, summed over pieces</td></tr>
+</tbody></table></div>
+</section>
 <section aria-labelledby="prepare-progress">
 <h2 id="prepare-progress">prepare progress</h2>
 <p class="dim">one value from 0 to 1 that covers everything from download to warm-up. any number of observers can read it, and calling <code>prepare()</code> twice joins the same work.</p>
@@ -481,7 +489,7 @@ try await preparing.value</code></pre>
 <tr><th scope="row" class="mono"><code>warmUp</code></th><td>warming up</td><td>3%</td><td>finished warm-up runs</td></tr>
 <tr><th scope="row" class="mono"><code>ready</code></th><td>ready</td><td>0%</td><td>the end</td></tr>
 </tbody></table></div>
-<p class="dim">the shares are starting values from the plan, to be replaced by times measured on this mac. the stream is the current or next prepare run and ends when the run ends. a ready model gives 1 at once. a download resumes from its last written byte, a failed final hash downloads the file again, and cancel keeps partial files.</p>
+<p class="dim">the shares are starting values from the plan. compile, load and warm-up follow past timings on the device, since they report no progress of their own. the stream is the current or next prepare run and ends when the run ends. a ready model gives 1 at once. a download resumes from its last written byte, a failed final hash downloads the file again, and cancel keeps partial files.</p>
 </section>
 <section aria-labelledby="state">
 <h2 id="state">state and metrics</h2>
@@ -507,8 +515,8 @@ for await metrics in speech.metrics {           // about four times a second, on
 <tr><th scope="row" class="mono"><code>microphone: MicrophoneState</code></th><td>permission, capture and devices</td></tr>
 <tr><th scope="row" class="mono"><code>speech: SpeechActivity</code></th><td>silent or speaking</td></tr>
 <tr><th scope="row" class="mono"><code>pressure: SystemPressure</code></th><td>normal, busy (memory is tight), hot or lowPower</td></tr>
-<tr><th scope="row" class="mono"><code>placement: [Stage: Chip]</code></th><td>the planned chip for each stage</td></tr>
-<tr><th scope="row" class="mono"><code>precision: [Stage: Precision]</code></th><td>the precision for each stage</td></tr>
+<tr><th scope="row" class="mono"><code>placement: [Stage: Chip]</code></th><td>the chip each stage is set up to run on with the loaded engine, or the shipped placement before one loads. it is the configuration, not a measurement of where the work ran.</td></tr>
+<tr><th scope="row" class="mono"><code>precision: [Stage: Precision]</code></th><td>the precision each stage is set up to run in, the same way</td></tr>
 <tr><th scope="row" class="mono"><code>error: FourierError?</code></th><td>the last error that stopped prepare or a job, cleared by the next success</td></tr>
 <tr><th scope="row" class="mono"><code>JobState.id, kind, phase</code></th><td><code>kind</code> is transcribe, record or listen. <code>phase</code> is preparing, reading, capturing, running or finishing.</td></tr>
 <tr><th scope="row" class="mono"><code>JobState.progress: Double?</code></th><td>0 to 1 when it can be known, nil for open-ended work such as listening</td></tr>
@@ -520,17 +528,30 @@ for await metrics in speech.metrics {           // about four times a second, on
 <tr><th scope="row" class="mono"><code>realtimeSpeed: Double</code></th><td>seconds of audio finished per second of wall time, over the last few seconds</td></tr>
 <tr><th scope="row" class="mono"><code>tokensPerSecond: Double</code></th><td>tokens per second</td></tr>
 <tr><th scope="row" class="mono"><code>decoderStepsPerSecond: Double</code></th><td>decoder steps per second</td></tr>
-<tr><th scope="row" class="mono"><code>timeToFirstText: Duration?</code></th><td>from the call to the first text</td></tr>
+<tr><th scope="row" class="mono"><code>timeToFirstText: Duration?</code></th><td>to the first decoded token</td></tr>
 <tr><th scope="row" class="mono"><code>draftDelay: Duration?</code></th><td>how far live draft text is behind the voice</td></tr>
 <tr><th scope="row" class="mono"><code>settleDelay: Duration?</code></th><td>how long live text takes to settle</td></tr>
 <tr><th scope="row" class="mono"><code>workload: Workload</code></th><td>idle, short, medium, long, veryLong, manyFiles, realtime, realtimePlusFiles or underLoad</td></tr>
 <tr><th scope="row" class="mono"><code>batchWidth: Int</code></th><td>decoder rows in the current step</td></tr>
 <tr><th scope="row" class="mono"><code>maxBatchWidth: Int</code></th><td>the widest batch allowed right now</td></tr>
 <tr><th scope="row" class="mono"><code>queuedPieces: Int, activePieces: Int</code></th><td>pieces waiting and pieces running</td></tr>
-<tr><th scope="row" class="mono"><code>chipBusy: [Chip: Double]</code></th><td>share of recent time each chip spent on engine calls, 0 to 1. from the engine's own call timing, because macos has no public live npu usage api.</td></tr>
+<tr><th scope="row" class="mono"><code>chipBusy: [Chip: Double]</code></th><td>share of the last two seconds each chip spent on engine calls, 0 to 1, from the engine's own timing. the gpu is the wall time from committing its work to its completion, the cpu the time spent in mel and search. the neural engine has no measure, so it has no key rather than 0.</td></tr>
 <tr><th scope="row" class="mono"><code>appMemory: UInt64</code></th><td>the app's physical footprint</td></tr>
 <tr><th scope="row" class="mono"><code>weightMemory: UInt64</code></th><td>memory held by the weights</td></tr>
 <tr><th scope="row" class="mono"><code>cacheMemory: UInt64</code></th><td>decoder key-value cache in use</td></tr>
+<tr><th scope="row" class="mono"><code>device: DeviceReport?</code></th><td>what the engine read about this device when it loaded and the limits it derived, nil until it loads</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px"><code>DeviceReport</code></h3>
+<p class="dim">every limit the engine uses is derived from the device when it loads, not set for one machine. the caps are the values tuned and tested on an m4 with 32 gb. a smaller device derives less. a device without room for the weights and the cache of one two-minute piece fails to load with an error that says so.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="device report"><table><thead><tr><th scope="col">member</th><th scope="col">what it holds</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>gpuName, physicalMemory, memoryHeadroom, processorCount, performanceCores</code></th><td>measured: the gpu, the memory, how much more the app could use when the engine loaded, and the cores</td></tr>
+<tr><th scope="row" class="mono"><code>maxBufferLength, gpuWorkingSet, hasUnifiedMemory, maxThreadsPerThreadgroup, hasNeuralEngine</code></th><td>measured: the gpu's limits, and whether core ml lists a neural engine</td></tr>
+<tr><th scope="row" class="mono"><code>weightBuffers</code></th><td>derived: 1 when the checkpoint fits one gpu buffer, more when it is wrapped in windows</td></tr>
+<tr><th scope="row" class="mono"><code>cacheSlots, cacheBytes</code></th><td>derived: decoder cache slots and their size</td></tr>
+<tr><th scope="row" class="mono"><code>maxBatchWidth, pressuredBatchWidth</code></th><td>derived: the widest decoder batch in rows (12 at most), and the width under thermal, power or memory pressure</td></tr>
+<tr><th scope="row" class="mono"><code>encoderChunkGroup</code></th><td>derived: 1-second chunks per conv command buffer in the gpu encoder. the encoder's result does not depend on it.</td></tr>
+<tr><th scope="row" class="mono"><code>automaticPieceLength: Duration</code></th><td>derived: the piece length for audio over 120 s with automatic chunking, 30 s when two pieces fit at once, else 120 s</td></tr>
+<tr><th scope="row" class="mono"><code>offersNeuralEngine</code></th><td>derived: whether the neural engine encoder can be pinned at all</td></tr>
 </tbody></table></div>
 <h3 style="margin-top:32px">compute vocabulary</h3>
 <div class="table-wrap" tabindex="0" role="region" aria-label="stage chip precision"><table><thead><tr><th scope="col">type</th><th scope="col">cases</th></tr></thead><tbody>
@@ -586,7 +607,7 @@ let speech = Fourier(options)</code></pre>
 <p class="dim">every option is public and has a default. <code>FourierOptions()</code> is the recommended setup. defaults are read from the source.</p>
 <pre><code>var options = FourierOptions()
 options.keepWarm = .never
-options.compute.policy = .efficiency
+options.recordDrafts = false
 options.decoding.language = "English"
 options.chunking = .maxPieceLength(.seconds(20))
 options.listen.drafts = false
@@ -605,7 +626,7 @@ let speech = Fourier(options)</code></pre>
 <tr><th scope="row" class="mono"><code>gain</code></th><td><code>Gain</code></td><td><code>.automatic</code></td><td>forwards to <code>listen.gain</code></td></tr>
 <tr><th scope="row" class="mono"><code>speechDetector</code></th><td><code>(any SpeechDetecting)?</code></td><td><code>nil</code></td><td>forwards to <code>listen.speechDetector</code>. nil uses the built-in energy gate.</td></tr>
 <tr><th scope="row" class="mono"><code>preRoll</code></th><td><code>Duration</code></td><td><code>.milliseconds(500)</code></td><td>forwards to <code>listen.preRoll</code>. audio kept from before speech starts.</td></tr>
-<tr><th scope="row" class="mono"><code>recordDrafts: Bool</code></th><td><code>true</code></td><td>show draft text while recording. the transcript still comes from one exact pass after <code>stop()</code>.</td></tr>
+<tr><th scope="row" class="mono"><code>recordDrafts</code></th><td><code>Bool</code></td><td><code>true</code></td><td>show draft text while recording. the transcript still comes from one exact pass after <code>stop()</code>.</td></tr>
 <tr><th scope="row" class="mono"><code>keepWarm</code></th><td><code>KeepWarm</code></td><td><code>.automatic</code></td><td>how long the model stays loaded</td></tr>
 <tr><th scope="row" class="mono"><code>permissions</code></th><td><code>PermissionHandling</code></td><td><code>.automatic</code></td><td>who asks for the microphone</td></tr>
 <tr><th scope="row" class="mono"><code>model</code></th><td><code>ModelOptions</code></td><td><code>ModelOptions()</code></td><td>where the model is stored and which revision</td></tr>
@@ -613,15 +634,15 @@ let speech = Fourier(options)</code></pre>
 </tbody></table></div>
 <h3 style="margin-top:32px"><code>ComputeOptions</code></h3>
 <div class="table-wrap" tabindex="0" role="region" aria-label="compute options"><table><thead><tr><th scope="col">option</th><th scope="col">type</th><th scope="col">default</th><th scope="col">what it does</th></tr></thead><tbody>
-<tr><th scope="row" class="mono"><code>policy</code></th><td><code>PlacementPolicy</code></td><td><code>.automatic</code></td><td><code>automatic</code> is the fastest measured chip for each stage. <code>npu</code> prefers the neural engine where a path exists. <code>efficiency</code> prefers the lowest power path.</td></tr>
-<tr><th scope="row" class="mono"><code>chips</code></th><td><code>[Stage: Chip]</code></td><td><code>[:]</code></td><td>hard pins. a pin no shipped path can satisfy fails prepare with <code>unsupportedPin</code>.</td></tr>
+<tr><th scope="row" class="mono"><code>policy</code></th><td><code>PlacementPolicy</code></td><td><code>.automatic</code></td><td>accepted and kept, but it does not change the placement today. every policy, <code>automatic</code>, <code>npu</code> and <code>efficiency</code>, resolves to the gpu for the encoder and decoder, with mel and search on the cpu. the neural engine encoder does not pass the exactness margin, so no policy moves work to it.</td></tr>
+<tr><th scope="row" class="mono"><code>chips</code></th><td><code>[Stage: Chip]</code></td><td><code>[:]</code></td><td>hard pins, the only way to move a stage. the shipped paths are the gpu for the decoder and the gpu or the neural engine for the encoder. a pin no shipped path can satisfy fails prepare with <code>unsupportedPin</code>. a pinned placement is outside the exactness claim: the neural engine encoder uses 35 to 44 times the safety margin on the golden clips.</td></tr>
 <tr><th scope="row" class="mono"><code>precision</code></th><td><code>[Stage: Precision]</code></td><td><code>[:]</code></td><td>hard pins. a pin no shipped path can satisfy fails prepare with <code>unsupportedPrecision</code>.</td></tr>
 </tbody></table></div>
-<p class="dim"><code>ComputeOptions.init(policy:chips:precision:)</code> takes all three, each with its default.</p>
+<p class="dim"><code>ComputeOptions.init(policy:chips:precision:)</code> takes all three, each with its default. <code>var resolvedPlacement: [Stage: Chip]</code> returns the chip each stage runs on with these options: the shipped placement with the pins applied. the policy does not change it.</p>
 <h3 style="margin-top:32px"><code>DecodingOptions</code></h3>
 <div class="table-wrap" tabindex="0" role="region" aria-label="decoding options"><table><thead><tr><th scope="col">option</th><th scope="col">type</th><th scope="col">default</th><th scope="col">what it does</th></tr></thead><tbody>
 <tr><th scope="row" class="mono"><code>search</code></th><td><code>Search</code></td><td><code>.automatic</code></td><td><code>automatic</code> is the checkpoint's own search, 3 beams. <code>greedy</code>. <code>beam(Int)</code> takes 1 to 12.</td></tr>
-<tr><th scope="row" class="mono"><code>maxTokens</code></th><td><code>Int?</code></td><td><code>nil</code></td><td>nil uses the checkpoint's limit, 512. at least 1 if set.</td></tr>
+<tr><th scope="row" class="mono"><code>maxTokens</code></th><td><code>Int?</code></td><td><code>nil</code></td><td>nil uses the checkpoint's limit, 512: a piece that reaches it is split at a quiet point and decoded again. a value you set is a hard cap: a piece stops there, is not split and reports <code>reachedStop == false</code>. at least 1.</td></tr>
 <tr><th scope="row" class="mono"><code>repeatGuard</code></th><td><code>Int?</code></td><td><code>nil</code></td><td>no-repeat n-gram size. nil uses the checkpoint's, 8. 0 turns it off.</td></tr>
 <tr><th scope="row" class="mono"><code>language</code></th><td><code>String</code></td><td><code>"English"</code></td><td>a name or code such as english or en. the model is english only, so other languages throw <code>unsupportedLanguage</code>.</td></tr>
 <tr><th scope="row" class="mono"><code>context</code></th><td><code>String?</code></td><td><code>nil</code></td><td>text the model reads before the audio, such as names and terms. nil is the exact path.</td></tr>
@@ -642,9 +663,9 @@ let speech = Fourier(options)</code></pre>
 </tbody></table></div>
 <h3 style="margin-top:32px"><code>KeepWarm</code> and <code>PermissionHandling</code></h3>
 <div class="table-wrap" tabindex="0" role="region" aria-label="lifecycle options"><table><thead><tr><th scope="col">case</th><th scope="col">meaning</th></tr></thead><tbody>
-<tr><th scope="row" class="mono"><code>KeepWarm.automatic</code></th><td>stays loaded after prepare(). cools after 5 idle minutes, under memory pressure or when the mac is hot.</td></tr>
+<tr><th scope="row" class="mono"><code>KeepWarm.automatic</code></th><td>stays loaded after prepare(). cools after 5 idle minutes, under memory pressure or when the device is hot.</td></tr>
 <tr><th scope="row" class="mono"><code>KeepWarm.always</code></th><td>stays loaded until cool() or critical memory pressure</td></tr>
-<tr><th scope="row" class="mono"><code>KeepWarm.never</code></th><td>lets go of the model as soon as nothing is running</td></tr>
+<tr><th scope="row" class="mono"><code>KeepWarm.never</code></th><td>lets go of the model as soon as nothing is running, also after a listen session and between back-to-back jobs. the next call loads it again.</td></tr>
 <tr><th scope="row" class="mono"><code>PermissionHandling.automatic</code></th><td>the first listen() or record() asks for the microphone</td></tr>
 <tr><th scope="row" class="mono"><code>PermissionHandling.manual</code></th><td>the sdk never prompts. call requestMicrophone() yourself.</td></tr>
 <tr><th scope="row" class="mono"><code>PermissionHandling.custom(@Sendable () async -&gt; MicrophoneState.Permission)</code></th><td>called when the permission was never asked. return the permission after your own flow.</td></tr>
@@ -656,7 +677,7 @@ let speech = Fourier(options)</code></pre>
 <tr><th scope="row" class="mono"><code>repository</code></th><td><code>String</code></td><td><code>"oruk/oruk-fourier-2b"</code></td><td>the hugging face repository</td></tr>
 <tr><th scope="row" class="mono"><code>revision</code></th><td><code>String</code></td><td><code>the pinned revision</code></td><td>the pinned revision is <code>8c2a8871f1304aa2f634da4fb95e24438c4945b9</code>. <code>ModelOptions.pinnedRevision</code> returns it.</td></tr>
 <tr><th scope="row" class="mono"><code>sha256</code></th><td><code>String?</code></td><td><code>nil</code></td><td>the weights' sha256. nil uses the pinned one, which only fits the pinned revision. another revision without one throws <code>unverifiedRevision</code>.</td></tr>
-<tr><th scope="row" class="mono"><code>offline</code></th><td><code>Bool</code></td><td><code>false</code></td><td>never touches the network. prepare fails with <code>offlineModelMissing</code> if the model is not on this mac.</td></tr>
+<tr><th scope="row" class="mono"><code>offline</code></th><td><code>Bool</code></td><td><code>false</code></td><td>never touches the network. prepare fails with <code>offlineModelMissing</code> if the model is not on this device.</td></tr>
 <tr><th scope="row" class="mono"><code>ModelOptions.defaultDirectory</code></th><td><code>static var URL</code></td><td></td><td>where the pinned model lives by default</td></tr>
 </tbody></table></div>
 <p class="dim"><code>ModelOptions.init(directory:revision:sha256:offline:)</code> takes <code>revision</code> as an optional, and nil means the pinned one.</p>
@@ -781,7 +802,7 @@ options.modelStore = LocalStore(folder: folderUrl)</code></pre>
 }</code></pre>
 <div class="table-wrap" tabindex="0" role="region" aria-label="fourier errors"><table><thead><tr><th scope="col">case</th><th scope="col">when</th><th scope="col">what to do</th></tr></thead><tbody>
 <tr><th scope="row" class="mono"><code>microphoneDenied</code></th><td>the user said no to the microphone</td><td>show how to turn it on, and call <code>openMicrophoneSettings()</code></td></tr>
-<tr><th scope="row" class="mono"><code>microphoneRestricted</code></th><td>a device policy blocks the microphone</td><td>tell the user to ask whoever manages the mac. there is no button to offer.</td></tr>
+<tr><th scope="row" class="mono"><code>microphoneRestricted</code></th><td>a device policy blocks the microphone</td><td>tell the user to ask whoever manages the device. there is no button to offer.</td></tr>
 <tr><th scope="row" class="mono"><code>microphoneNotRequested</code></th><td>permissions are <code>.manual</code> and the app has not asked yet</td><td>call <code>requestMicrophone()</code> first</td></tr>
 <tr><th scope="row" class="mono"><code>noMicrophone</code></th><td>there is no input device</td><td>ask the user to connect one</td></tr>
 <tr><th scope="row" class="mono"><code>deviceRemoved</code></th><td>the input device went away and capture could not recover</td><td>connect it again or choose another input</td></tr>
@@ -790,7 +811,7 @@ options.modelStore = LocalStore(folder: folderUrl)</code></pre>
 <tr><th scope="row" class="mono"><code>downloadFailed(String)</code></th><td>the model download failed</td><td>check the connection and try again. it resumes where it stopped.</td></tr>
 <tr><th scope="row" class="mono"><code>hashMismatch</code></th><td>the downloaded weights did not match the pinned hash, even after a fresh download</td><td>check the connection and try again</td></tr>
 <tr><th scope="row" class="mono"><code>notEnoughDisk(needed:available:)</code></th><td>there is not enough free space, in bytes</td><td>free some space and try again</td></tr>
-<tr><th scope="row" class="mono"><code>offlineModelMissing</code></th><td><code>model.offline</code> is on and the model is not on this mac</td><td>turn offline mode off once to download it</td></tr>
+<tr><th scope="row" class="mono"><code>offlineModelMissing</code></th><td><code>model.offline</code> is on and the model is not on this device</td><td>turn offline mode off once to download it</td></tr>
 <tr><th scope="row" class="mono"><code>unverifiedRevision(String)</code></th><td>a revision other than the pinned one has no known checksum</td><td>pass its sha256 in <code>ModelOptions</code></td></tr>
 <tr><th scope="row" class="mono"><code>modelInvalid(String)</code></th><td>the model files could not be read</td><td>delete the model folder and prepare again</td></tr>
 <tr><th scope="row" class="mono"><code>unsupportedPin(stage:chip:)</code></th><td>no shipped path runs that stage on that chip</td><td>remove the pin or use automatic placement</td></tr>
@@ -800,7 +821,7 @@ options.modelStore = LocalStore(folder: folderUrl)</code></pre>
 <tr><th scope="row" class="mono"><code>invalidOptions(String)</code></th><td>an option is out of range, such as a beam count outside 1 to 12 or <code>settleAfter</code> under 1</td><td>fix the option</td></tr>
 <tr><th scope="row" class="mono"><code>cancelled</code></th><td>the work was cancelled</td><td>nothing. this is the result of <code>cancel()</code> or a cancelled task.</td></tr>
 <tr><th scope="row" class="mono"><code>sessionEnded</code></th><td>the live session already finished or was cancelled</td><td>start a new one</td></tr>
-<tr><th scope="row" class="mono"><code>engineFailure(String)</code></th><td>the engine failed</td><td>try again. if it keeps failing, call <code>cool()</code> and retry.</td></tr>
+<tr><th scope="row" class="mono"><code>engineFailure(String)</code></th><td>the engine failed, or another model was asked for while work on the loaded one was still running, which is refused</td><td>try again. if it keeps failing, call <code>cool()</code> and retry.</td></tr>
 </tbody></table></div>
 </section>
 <section aria-labelledby="ui">
@@ -824,45 +845,59 @@ struct Root: View {
 <div class="table-wrap" tabindex="0" role="region" aria-label="ui models"><table><thead><tr><th scope="col">declaration</th><th scope="col">what it does</th></tr></thead><tbody>
 <tr><th scope="row" class="mono"><code>FourierStateModel</code></th><td>an observable model of the sdk on the main actor. <code>init(_ speech: Fourier = Fourier())</code>. members: <code>speech</code>, <code>state</code>, <code>prepare</code>, <code>microphone</code>, <code>level</code>, <code>metrics</code>, <code>speedHistory</code>, <code>machine</code>, <code>prepareError</code>, <code>isPreparing</code>, <code>isReady</code> and <code>historyLength</code>. calls: <code>observe() async</code>, <code>observeMetrics() async</code>, <code>prepare() async</code>, <code>requestMicrophone() async -&gt; MicrophoneState.Permission</code>, <code>openMicrophoneSettings()</code> and <code>refreshMicrophone() async</code>.</td></tr>
 <tr><th scope="row" class="mono"><code>FourierListenModel</code></th><td>one listen session at a time on the main actor. <code>init(_ speech: Fourier = Fourier(), options: ListenOptions? = nil)</code>. members: <code>phase</code> (<code>idle</code>, <code>starting</code>, <code>listening</code>, <code>finishing</code>), <code>update</code>, <code>level</code>, <code>isSpeaking</code>, <code>transcript</code>, <code>warning</code>, <code>error</code>, <code>startedAt</code>, <code>isRunning</code>, <code>settledText</code>, <code>draftText</code> and <code>onFinish</code>. calls: <code>start()</code>, <code>stop()</code>, <code>toggle()</code>, <code>cancel()</code> and <code>clear()</code>.</td></tr>
-<tr><th scope="row" class="mono"><code>FourierMachine</code></th><td>chip, memory, thermal state and power source of this mac. <code>FourierMachine.read()</code> reads it.</td></tr>
+<tr><th scope="row" class="mono"><code>FourierMachine</code></th><td>chip, memory, thermal state, power source and low power mode of this device. <code>FourierMachine.read()</code> reads it.</td></tr>
+<tr><th scope="row" class="mono"><code>FourierMetricSample</code></th><td>one point of <code>speedHistory</code>: <code>id</code>, <code>date</code>, <code>realtimeSpeed</code> and <code>tokensPerSecond</code></td></tr>
 </tbody></table></div>
 <h3 style="margin-top:32px">views</h3>
 <div class="table-wrap" tabindex="0" role="region" aria-label="ui views"><table><thead><tr><th scope="col">view</th><th scope="col">initializers</th><th scope="col">what it does</th></tr></thead><tbody>
 <tr><th scope="row" class="mono"><code>FourierPrepareView</code></th><td><code>init(_ model: FourierStateModel, title: String = ..., message: String? = ..., startsPrepare: Bool = true)</code>, and the same with <code>@ViewBuilder accessory: () -&gt; Accessory</code></td><td>download and prepare progress</td></tr>
 <tr><th scope="row" class="mono"><code>FourierPermissionView</code></th><td><code>init(_ model: FourierStateModel, reason: String = ...)</code>, and the same with <code>@ViewBuilder granted: () -&gt; Granted</code></td><td>the microphone request and the denied and restricted states. it shows its content once granted.</td></tr>
-<tr><th scope="row" class="mono"><code>FourierMicButton</code></th><td><code>init(_ listen: FourierListenModel, diameter: CGFloat = 64)</code>, <code>init(status: FourierMicStatus, diameter: CGFloat = 64, action: @escaping () -&gt; Void)</code>, and a version with <code>@ViewBuilder label: @escaping (FourierMicStatus) -&gt; Label</code></td><td>a round start and stop button whose symbol follows the live state</td></tr>
+<tr><th scope="row" class="mono"><code>FourierMicButton</code></th><td><code>init(_ listen: FourierListenModel, diameter: CGFloat = 64)</code>, <code>init(status: FourierMicStatus, diameter: CGFloat = 64, action: @escaping () -&gt; Void)</code>, and a version with <code>@ViewBuilder label: @escaping (FourierMicStatus) -&gt; Label</code></td><td>a round start and stop button whose symbol follows the live state. <code>plain()</code> drops its own glass.</td></tr>
 <tr><th scope="row" class="mono"><code>FourierMicSymbol</code></th><td><code>init(status: FourierMicStatus, size: CGFloat = 24)</code></td><td>the symbol alone</td></tr>
 <tr><th scope="row" class="mono"><code>FourierLevelMeter</code></th><td><code>init(level: Float, isActive: Bool = true, barCount: Int = 24, barWidth: CGFloat = 4, spacing: CGFloat = 4, ink: FourierInk = .secondary)</code></td><td>driven by the input level, 0 to 1</td></tr>
-<tr><th scope="row" class="mono"><code>FourierLiveText</code></th><td><code>init(settled: String, draft: String = "", placeholder: String = "", style: FourierTextStyle = .largeTitle)</code>, <code>init(_ update: LiveUpdate?, ...)</code> and <code>init(_ listen: FourierListenModel, ...)</code></td><td>settled and draft text, lowercase on screen</td></tr>
+<tr><th scope="row" class="mono"><code>FourierLiveText</code></th><td><code>init(settled: String, draft: String = "", placeholder: String = "", style: FourierTextStyle = .largeTitle)</code>, <code>init(paragraphs: [FourierLiveText.Paragraph], ...)</code>, <code>init(_ update: LiveUpdate?, ...)</code> and <code>init(_ listen: FourierListenModel, ...)</code></td><td>settled and draft text, lowercase on screen. each phrase is its own paragraph, so closed phrases never redraw.</td></tr>
 <tr><th scope="row" class="mono"><code>FourierStatsView</code></th><td><code>init(_ model: FourierStateModel)</code>, and the same with <code>@ViewBuilder footer: () -&gt; Footer</code></td><td>live speed, latency, packing, chip and memory stats</td></tr>
 </tbody></table></div>
-<p class="dim"><code>FourierLiveView</code> puts prepare, permission, mic, level and live text together: <code>FourierLiveView(speech)</code> is the whole live screen.</p>
+<p class="dim"><code>FourierLiveView</code> puts prepare, permission, mic, level and live text together: <code>FourierLiveView(speech)</code> is the whole live screen. <code>FourierLiveView(state:listen:)</code> takes models the app owns, so other controls can share the session.</p>
+<h3 style="margin-top:32px">surfaces and helpers</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="ui surfaces"><table><thead><tr><th scope="col">declaration</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>FourierControlBar(action:leading:center:trailing:)</code></th><td>the floating capsule of system glass for live controls. with <code>action</code>, a tap anywhere on the bar runs it.</td></tr>
+<tr><th scope="row" class="mono"><code>View.fourierGlassPanel(cornerRadius:padding:)</code></th><td>a glass panel for loading and progress</td></tr>
+<tr><th scope="row" class="mono"><code>View.fourierGlass(in:)</code>, <code>fourierGlassWindow()</code>, <code>fourierGlassButton(prominent:)</code></th><td>the glass surfaces the kit's views use, from one place</td></tr>
+<tr><th scope="row" class="mono"><code>View.fourierScrollEdges(top:bottom:)</code></th><td>fades what scrolls under the top and bottom edges</td></tr>
+<tr><th scope="row" class="mono"><code>View.fourierFollowsNewest()</code></th><td>on a <code>ScrollView</code>: while the reader is at the end, new content scrolls into view as it streams in. scrolling up lets go, and scrolling back to the end picks it up again.</td></tr>
+<tr><th scope="row" class="mono"><code>FourierGlass</code></th><td>the shared sizes and materials: <code>surface</code>, <code>window</code>, <code>panelRadius</code>, <code>panelPadding</code>, <code>edgeFade</code> and <code>barHeight</code></td></tr>
+<tr><th scope="row" class="mono"><code>FourierInk</code>, <code>View.fourierInk(_:)</code></th><td>text levels: <code>primary</code>, <code>secondary</code>, <code>tertiary</code>, <code>fill</code> and <code>faintFill</code>. <code>draft</code> is <code>secondary</code>.</td></tr>
+<tr><th scope="row" class="mono"><code>FourierFormat</code></th><td>lowercase strings for bytes, latency, clock time, speed, rates, percents, workload, engine state, pressure, stage, chip and errors</td></tr>
+</tbody></table></div>
 <h3 style="margin-top:32px">type</h3>
 <div class="table-wrap" tabindex="0" role="region" aria-label="ui type"><table><thead><tr><th scope="col">declaration</th><th scope="col">what it does</th></tr></thead><tbody>
 <tr><th scope="row" class="mono"><code>FourierFont</code></th><td><code>allo</code>, <code>system</code> or <code>custom(@Sendable (FourierTextStyle, FourierNumbers) -&gt; Font)</code>. <code>FourierFont.isAlloAvailable</code> and <code>FourierFont.alloLoadError</code> say whether allo loaded.</td></tr>
 <tr><th scope="row" class="mono"><code>View.fourierFont(_ font: FourierFont)</code></th><td>sets the typeface for every kit view below it. the default is <code>.allo</code>, and it falls back to the system font if allo cannot load.</td></tr>
 <tr><th scope="row" class="mono"><code>View.fourierTextStyle(_ style: FourierTextStyle, numbers: FourierNumbers = .proportional)</code></th><td>sets text in a step of the type scale</td></tr>
-<tr><th scope="row" class="mono"><code>FourierTextStyle</code></th><td><code>init(size:weight:lineHeight:tracking:roundness:)</code> and three sizes: <code>caption</code> (12 on 16), <code>body</code> (16 on 24), <code>title</code> (16 on 24, semibold) and <code>largeTitle</code> (32 on 40)</td></tr>
+<tr><th scope="row" class="mono"><code>FourierTextStyle</code></th><td><code>init(size:weight:lineHeight:tracking:roundness:)</code> and four steps: <code>caption</code> (12 on 16), <code>body</code> (16 on 24), <code>title</code> (16 on 24, semibold) and <code>largeTitle</code> (32 on 40)</td></tr>
 <tr><th scope="row" class="mono"><code>FourierNumbers</code></th><td><code>proportional</code> or <code>tabular</code>. use tabular for numbers that change in place.</td></tr>
 </tbody></table></div>
 </section>
 <section aria-labelledby="exactness">
 <h2 id="exactness">exactness and what it covers</h2>
-<p class="dim">on the three golden clips, the default path gives the same token ids and the same final text as hugging face transformers running the original weights. the reference is pinned to one transformers commit, runs on the cpu in 32-bit float with a batch of one, and is frozen in <code>golden/</code>.</p>
+<p class="dim">on the three golden clips, the default path gives the same token ids, final text and stop as hugging face transformers running the original weights, and the same ten ranked candidates at every step, with every deciding comparison using under half its margin. the reference is pinned to one transformers commit, runs on the cpu in 32-bit float with a batch of one, and is frozen in <code>golden/</code>. the three clips are english, cut from one recording, whole multiples of 160 samples and longer than 0.5 s. other lengths are only run, not compared.</p>
 <div class="table-wrap" tabindex="0" role="region" aria-label="what is covered"><table><thead><tr><th scope="col">case</th><th scope="col">claim</th></tr></thead><tbody>
 <tr><th scope="row">audio up to 120 s, default options</th><td>one pass. identical to the reference on the three golden clips. the golden test checks this on the engine and again through <code>transcribe</code> for a file and a recording.</td></tr>
 <tr><th scope="row">audio over 120 s</th><td>cut at quiet points and joined. that changes the model's input, so it is not claimed identical to one reference pass.</td></tr>
-<tr><th scope="row">a piece that hits the token limit</th><td>split and decoded again, and counted in <code>tokenLimitSplits</code>. <code>reachedStop</code> is false if it could not be split further.</td></tr>
-<tr><th scope="row">any batch width, slot or load</th><td>scores are bit-identical to a run alone. the golden test checks batches and slot refill.</td></tr>
+<tr><th scope="row">a piece that hits the token limit</th><td>at the checkpoint's limit, split and decoded again, and counted in <code>tokenLimitSplits</code>. <code>reachedStop</code> is false if it could not be split further. a <code>maxTokens</code> you set is a cap and leaves the exact path.</td></tr>
+<tr><th scope="row">any batch width, slot or load</th><td>scores are bit-identical to a run alone. the golden test checks total widths of 1, 2, 3, 4, 5, 7, 8, 10, 11 and 12 rows with beam counts from 1 to 4, slot refill, a sustained 12-row run and a reload. widths over 12 rows are never used and not run.</td></tr>
+<tr><th scope="row">a pinned chip</th><td>outside the claim. the neural engine encoder uses 35 to 44 times the safety margin on the golden clips.</td></tr>
 <tr><th scope="row">changed decoding options</th><td><code>greedy</code>, a different beam count, token limit, repeat guard or <code>context</code> leave the exact path.</td></tr>
 <tr><th scope="row">custom parts</th><td>custom noise processing, speech detection or audio sources change what the model hears, so they leave the exact path.</td></tr>
 <tr><th scope="row">files and recordings</th><td>never cleaned by default, so they can match the reference. file decoding and resampling are outside the contract, because apple's and python's will not match bit for bit. the contract starts at 16 khz mono float32 samples.</td></tr>
-<tr><th scope="row">listen</th><td>drafts use greedy search and are not exact. the final transcript is the exact pass over each phrase. that it equals transcribe with the same split points is a goal. the golden test does not check it yet.</td></tr>
+<tr><th scope="row">listen</th><td>drafts use greedy search and are not exact. the final transcript is the exact pass over each phrase. the golden test plays each clip in at real speed and checks that every phrase equals <code>transcribe</code> on the same audio and that settled text is never taken back. a phrase whose exact pass failed twice is live text, with <code>isExact == false</code>.</td></tr>
+<tr><th scope="row">record drafts and file updates</th><td>quick passes or work in progress, not exact. only the returned transcript is.</td></tr>
 </tbody></table></div>
 <p class="dim">the golden test is the only automated check. what it checks and how to run it is in CONTRIBUTING.md, and the numbers are on the <a href="performance.html">performance page</a>. only exact paths can be defaults: if a fast path cannot reproduce the reference, a slower exact path stays.</p>
 </section>
 
-<footer>every signature here is read from the public declarations in Sources/FourierKit/Speech.</footer>
+<footer>every signature here is read from the public declarations in Sources/FourierKit and Sources/FourierKitUI.</footer>
 </main>
 </body>
 </html>

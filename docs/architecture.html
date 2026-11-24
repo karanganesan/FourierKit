@@ -222,7 +222,7 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
 <main>
   <h1>how fourier packs compute</h1>
   <p class="lead">every step of inference, which chip runs it, and how the work is packed so nothing waits that doesn't have to.</p>
-  <p class="status">the design, as planned. what was measured: the decoder and the encoder both run on the gpu, the neural engine encoder lost on exactness, and a wide batch is worth about 1.3x. see <a href="performance.html">the performance page</a>.</p>
+  <p class="status">what runs today, checked against the code on 2026-11-24: mel and search on the cpu, the encoder and the decoder on the gpu, on macos and on ios and ipados. the neural engine encoder exists but lost on exactness, so it runs only when pinned. the packing diagrams further down show the design, and say where today differs. numbers are on <a href="performance.html">the performance page</a>.</p>
   <div class="legend" aria-label="chip legend">
     <span><b class="n"></b>npu</span>
     <span><b class="g"></b>gpu</span>
@@ -231,13 +231,13 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
 
   <section aria-labelledby="path">
     <h2 id="path">the whole path</h2>
-    <p class="dim">the decoder starts on the gpu, npu and gpu race for the encoder, and the cpu runs small audio stages, parallel work and logic. the main thread only draws.</p>
+    <p class="dim">the gpu runs the encoder, the prefill and every decoder step. the cpu runs the audio stages, the search and the text. the neural engine has an encoder path that is used only when a caller pins it. the main thread only draws.</p>
     <div class="flow" id="flow"></div>
   </section>
 
   <section aria-labelledby="steps">
     <h2 id="steps">every step</h2>
-    <p class="dim"><strong>first</strong> is built first. <strong>race</strong> means both chips get built and the faster exact one keeps the step. <strong>test</strong> is checked in the one-layer benchmark before any full build. <strong>parallel</strong> means the cpu splits it across cores. <strong>backup</strong> runs only if the others fail the golden test.</p>
+    <p class="dim"><strong>runs it</strong> is where the step runs today, on every device. <strong>parallel</strong> means the cpu splits it across cores. <strong>pin only</strong> is a built path that runs only when a caller pins that chip, outside the exactness claim. <strong>tried</strong> was measured and lost, and is not built.</p>
     <div class="table-wrap" tabindex="0" role="region" aria-label="every inference step by chip">
       <table class="steps">
         <thead><tr><th scope="col">step and how it is packed</th><th scope="col" class="chipcell">npu</th><th scope="col" class="chipcell">gpu</th><th scope="col" class="chipcell">cpu</th></tr></thead>
@@ -248,40 +248,40 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
 
   <section aria-labelledby="time">
     <h2 id="time">where the work is</h2>
-    <p class="dim">for one 2-minute clip, the decoder does almost all the memory work, so the packing is built around it. these are estimates until measured.</p>
+    <p class="dim">the long golden clip, 116.5 s, in the newest passing run, best of four warm runs. the decoder is most of the time, so the packing is built around it.</p>
     <div class="ways">
-      <article class="way"><div class="stat">15</div><h3>encoder blocks</h3><p>fixed 8-second blocks that can run as one batch.</p></article>
-      <article class="way"><div class="stat">~410</div><h3>decoder steps</h3><p>one per token, and each step depends on the last.</p></article>
-      <article class="way"><div class="stat">~2,000x</div><h3>more weight data</h3><p>read by the batched decoder than by one batched encoder pass.</p></article>
+      <article class="way"><div class="stat">0.8 s</div><h3>encoder</h3><p>117 one-second chunks through the conv front, then 24 layers with attention inside 8-second blocks.</p></article>
+      <article class="way"><div class="stat">2.2 s</div><h3>prefill</h3><p>the prompt and 1,515 audio tokens in one pass on apple's matrix kernel.</p></article>
+      <article class="way"><div class="stat">14.3 s</div><h3>decode</h3><p>285 steps, one per token for three beams, each step reading all 3.44 gb of decoder weights. 19.9 steps per second.</p></article>
     </div>
   </section>
 
   <section aria-labelledby="combined">
     <h2 id="combined">the combined engine</h2>
-    <p class="dim">one wide decoder batch on the fastest chip, the encoder working ahead on the other, and the cpu running beam logic. x, y and z are audio pieces, a number is a decoder step, and each row of a piece is a beam. a column is one turn in order, not a timing.</p>
+    <p class="dim">the design: one wide decoder batch on the fastest chip, the encoder working ahead on another, and the cpu running beam logic. x, y and z are audio pieces, a number is a decoder step, and each row of a piece is a beam. a column is one turn in order, not a timing.</p>
     <div class="switch" id="switch" role="group" aria-label="choose a packing"></div>
     <p class="note" id="note" aria-live="polite"></p>
     <div class="packer">
       <div class="lane-labels" id="lane-labels" aria-hidden="true"></div>
       <div class="lanes" id="lanes" role="img" aria-label="work tiles arranged across npu, gpu, cpu and main thread lanes for the chosen packing"></div>
     </div>
-    <p class="dim small">the decoder is drawn on the gpu and the encoder on the npu as an example. the race decides which chip gets which.</p>
+    <p class="dim small">the encoder is drawn on the npu as the plan drew it. the race went to the gpu: today a new piece is encoded and read in on the gpu between decoder steps, one piece per step while others run. the batch, the slot refill and the beam logic on the cpu are as drawn.</p>
     <h3 style="margin-top:32px">how calls get packed</h3>
     <ol class="rules">
       <li><strong>store 16-bit, compute 32-bit.</strong> weights are read at half the memory cost, and the math keeps full precision.</li>
       <li><strong>one wide decoder batch.</strong> beams and pieces share each weight read.</li>
       <li><strong>refill slots at once.</strong> when a piece ends, the next one takes its slot without draining the batch.</li>
-      <li><strong>encoder works ahead.</strong> the other chip prepares the next piece, so the batch never waits for audio.</li>
+      <li><strong>encoder works ahead.</strong> not today: with the encoder on the gpu, a new piece is encoded between decoder steps.</li>
       <li><strong>never copy beam history.</strong> each step writes to its own cache slot, and a per-beam ancestry table says which slots make up each beam.</li><li><strong>batching must be invisible.</strong> a row's scores are bit-identical at any batch width, slot, neighbor or padding, with metal fast-math off.</li>
-      <li><strong>pack the calls.</strong> many pieces go into one gpu command buffer or one npu batch, and the next call is prepared while this one runs.</li>
+      <li><strong>pack the calls.</strong> a decoder step for every running piece is one gpu command buffer. the engine can also read several waiting pieces in one prefill, bit-identical to reading each alone, but the scheduler does not use it: a try showed no gain for twelve clips at once.</li>
       <li><strong>slow down, never overflow.</strong> bounded queues hold back the stage before a slow one.</li>
-      <li><strong>recover on its own.</strong> if a chip call fails, that piece reruns on the exact gpu path.</li>
+      <li><strong>fail loudly, retry once.</strong> a work buffer that cannot be made throws instead of switching kernels. a file piece whose gpu call fails runs once more, and a live phrase whose exact pass fails is tried once more before its live text stands in.</li>
     </ol>
   </section>
 
   <section aria-labelledby="dynamic">
     <h2 id="dynamic">it packs itself for the workload</h2>
-    <p class="dim">the sdk reads what it was given and how busy the machine is, then re-plans before every decoder step. the caller sets nothing.</p>
+    <p class="dim">the sdk reads what it was given and how busy the device is, and admits waiting pieces before each decoder step: live pieces first, then by arrival, as rows and cache allow. the caller sets nothing. what the engine does is in the table. the lanes below draw the design, with the encoder on the npu.</p>
     <div class="switch" id="load-switch" role="group" aria-label="choose a workload"></div>
     <p class="note" id="load-note" aria-live="polite"></p>
     <div class="packer">
@@ -293,27 +293,56 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
         <thead><tr><th scope="col">workload</th><th scope="col">starting size</th><th scope="col">what wins</th><th scope="col">how it packs</th></tr></thead>
         <tbody>
           <tr><td><strong>short</strong></td><td>under 5 s</td><td>time to first text</td><td>warm model, starts at once, no batch wait</td></tr>
-          <tr><td><strong>medium</strong></td><td>5 to 30 s</td><td>speed</td><td>one pass, batched blocks and beams</td></tr>
-          <tr><td><strong>long</strong></td><td>30 to 120 s</td><td>speed</td><td>encoder streams blocks, then one large prefill</td></tr>
-          <tr><td><strong>very long</strong></td><td>past 120 s</td><td>throughput</td><td>shorter split pieces, wide batch, slots refilled</td></tr>
-          <tr><td><strong>many files</strong></td><td>any mix</td><td>throughput</td><td>similar lengths grouped, widest batch that fits</td></tr>
-          <tr><td><strong>realtime</strong></td><td>live</td><td>lowest latency</td><td>newest audio, tail only, update rate follows measured speed</td></tr>
-          <tr><td><strong>realtime plus files</strong></td><td>mixed</td><td>lowest latency</td><td>live goes first, files fill the spare slots</td></tr>
-          <tr><td><strong>under load</strong></td><td>hot, battery, busy</td><td>staying smooth</td><td>narrower batch, work waits in the queue</td></tr>
+          <tr><td><strong>medium</strong></td><td>5 to 30 s</td><td>speed</td><td>one pass, three beams in one batch</td></tr>
+          <tr><td><strong>long</strong></td><td>30 to 120 s</td><td>speed</td><td>one pass: the encoder over all chunks, then one prefill</td></tr>
+          <tr><td><strong>very long</strong></td><td>past 120 s</td><td>throughput</td><td>cut at quiet points into 30 s pieces when two fit in the cache at once, else as long as one pass allows. the pieces share the batch and refill its slots.</td></tr>
+          <tr><td><strong>many files</strong></td><td>any mix</td><td>throughput</td><td>pieces join the batch as they arrive, one per step while others run, up to the device's row cap (12 on the m4)</td></tr>
+          <tr><td><strong>realtime</strong></td><td>live</td><td>lowest latency</td><td>greedy passes over the open phrase with its settled tokens as the start, tokens streamed as they come, the rate following measured pass time</td></tr>
+          <tr><td><strong>realtime plus files</strong></td><td>mixed</td><td>lowest latency</td><td>live pieces are admitted before waiting file pieces</td></tr>
+          <tr><td><strong>under load</strong></td><td>hot, low power, short of memory</td><td>staying smooth</td><td>the row cap halves (12 to 6 on the m4), and work waits in the queue</td></tr>
         </tbody>
       </table>
     </div>
     <div class="ways">
       <article class="way"><h3>what it reads</h3><p>audio length, queue, deadlines, measured step time, memory pressure, thermal state, power, and chip health.</p></article>
-      <article class="way"><h3>what it changes</h3><p>batch width, which pieces share a call, which chip runs a stage, priority, and how far the encoder works ahead.</p></article>
+      <article class="way"><h3>what it changes</h3><p>batch width, which pieces share a step, priority, and the piece length for long audio. it does not move a stage to another chip.</p></article>
       <article class="way"><h3>what it never changes</h3><p>the answer. only exact paths are eligible, at any batch width and any load.</p></article>
     </div>
+  </section>
+
+<section aria-labelledby="limits">
+    <h2 id="limits">limits come from the device</h2>
+    <p class="dim">nothing is sized for one machine. when the engine loads it reads the device (memory headroom, gpu buffer and working-set limits, cores, whether core ml lists a neural engine) and derives every limit from that, the checkpoint and the generation settings. <code>FourierMetrics.device</code> reports both.</p>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="limits derived from the device"><table><thead><tr><th scope="col">limit</th><th scope="col">how it is derived</th><th scope="col">m4, 32 gb</th></tr></thead><tbody>
+      <tr><td><strong>scratch memory</strong></td><td>the work buffers one two-minute piece needs, held back first</td><td>reserved before the cache</td></tr>
+      <tr><td><strong>cache slots</strong></td><td>three quarters of the headroom left after the weights and scratch, at 229,376 bytes per slot, capped. a device without room for one two-minute piece fails to load with an error that says so.</td><td>12,288, the cap</td></tr>
+      <tr><td><strong>batch rows</strong></td><td>whole 30 s pieces the cache holds, times their beams, within the gpu working set, capped at 12</td><td>12, and 6 under pressure</td></tr>
+      <tr><td><strong>conv group</strong></td><td>1-second chunks per conv command buffer, at most 8, fewer if that passes a quarter of the spare memory. the encoder's result does not depend on it.</td><td>8</td></tr>
+      <tr><td><strong>piece length</strong></td><td>30 s for long audio when two pieces fit at once, else as long as one pass allows</td><td>30 s</td></tr>
+      <tr><td><strong>weight buffers</strong></td><td>one gpu buffer when the 4.08 gb file fits the device's buffer limit, else several windows</td><td>1</td></tr>
+    </tbody></table></div>
+    <p class="dim small">the caps are the values tuned and exactness-tested on the m4. the iphone 17 pro ran the three golden clips to the reference text with its own derived limits. the token-level golden test has not run on a phone.</p>
+  </section>
+
+  <section aria-labelledby="bits">
+    <h2 id="bits">where the bits are fixed</h2>
+    <p class="dim">batching must be invisible: a row's scores must not change with how many rows share a call or where the row sits. this holds in two different ways. the source is the header of <code>Sources/FourierKit/Model/Kernels.swift</code>.</p>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="where the bits are fixed"><table><thead><tr><th scope="col">path</th><th scope="col">used for</th><th scope="col">why a row's bits hold</th></tr></thead><tbody>
+      <tr><td><strong>the project's metal kernels</strong></td><td>every decoder step, at any batch width</td><td>each output value is computed in a fixed order that depends only on that row's data and context. most values come from one thread. rms norm, softmax and the value mix split into runs of 64 that add their partial sums in a fixed order. the one-row and three-row bandwidth kernels add in the same order and are bit-identical. a decoder step never uses apple's kernel. metal fast math is off.</td></tr>
+      <tr><td><strong>apple's matrix kernel</strong> (<code>MPSMatrixMultiplication</code>)</td><td>the prefill and the encoder, for products of 32 rows or more, and square prefill attention</td><td>its order is apple's and not documented. measured on the m4 against a 6,400-row run, a row's bits stop depending on the row count and position once the count passes a boundary that grows with the inner width: 10 rows at 1,024 and 2,048, 30 at 6,144, 40 at 4,096, 90 at 4,320 and 75 at 7,680. below it apple's kernel takes another path. so these passes are a pure function of the piece, and pieces read in one product stay identical to being read alone only when each is past the boundary by itself.</td></tr>
+    </tbody></table></div>
+    <p class="dim">the encoder's conv front runs in groups of 1-second chunks of 208 rows or more each, past the boundary, and the projection out of it runs once over the whole clip. so the encoder's result no longer depends on the conv group a device derives. weights stay as the checkpoint's bf16 bits and are widened to 32-bit inside each kernel, or one matrix at a time for apple's kernel, which is exact. the golden test checks the decoder side at total widths 1, 2, 3, 4, 5, 7, 8, 10, 11 and 12. the matrix-kernel boundaries were measured on an m4 only.</p>
+  </section>
+
+  <section aria-labelledby="streaming">
+    <h2 id="streaming">text while it works</h2>
+    <p class="dim">all three modes show text before they finish. the host calls back after every decoder step with the tokens so far. listen turns them into a draft that grows token by token. record runs quick greedy passes over the audio so far, cutting at a quiet point past 20 s so a pass never grows with the recording. transcribe streams the finished pieces as settled and the leading beam of the running one as a draft. with beams, that draft can change wholesale until its piece ends. progress inside a piece moves with the encoder, the prefill and each step, against an estimate of about 3.6 tokens per second of speech. only the transcript each mode returns is exact.</p>
   </section>
 
 <section aria-labelledby="realtime">
     <h2 id="realtime">the realtime path</h2>
     <p class="dim">everything before the model, on by default for live audio. the microphone is open only while listening, and files skip this path.</p>
-    <div class="table-wrap" tabindex="0" role="region" aria-label="realtime path"><table><thead><tr><th scope="col">step</th><th scope="col">where</th><th scope="col">what it does</th></tr></thead><tbody><tr><td><strong>permission</strong></td><td>first listen</td><td>asks once, only when needed, and reports microphone state</td></tr><tr><td><strong>voice processing</strong></td><td>audio system</td><td>noise suppression, echo cancellation and gain, with minimum ducking of other apps</td></tr><tr><td><strong>ring buffer</strong></td><td>audio thread</td><td>copies samples with no locks or waiting</td></tr><tr><td><strong>pre-roll</strong></td><td>ring buffer</td><td>keeps 500 ms so first words are not clipped</td></tr><tr><td><strong>speech detection</strong></td><td>cpu</td><td>fast energy gate starts drafts, and a speech classifier can veto false starts</td></tr><tr><td><strong>warm engine</strong></td><td>npu and gpu</td><td>already loaded, so the first call starts at once</td></tr><tr><td><strong>state</strong></td><td>background</td><td>one update per frame, produced off the main actor</td></tr></tbody></table></div>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="realtime path"><table><thead><tr><th scope="col">step</th><th scope="col">where</th><th scope="col">what it does</th></tr></thead><tbody><tr><td><strong>permission</strong></td><td>first listen</td><td>asks once, only when needed, and reports microphone state</td></tr><tr><td><strong>voice processing</strong></td><td>audio system</td><td>noise suppression, echo cancellation and gain, with minimum ducking of other apps</td></tr><tr><td><strong>ring buffer</strong></td><td>audio thread</td><td>copies samples with no locks or waiting</td></tr><tr><td><strong>pre-roll</strong></td><td>ring buffer</td><td>keeps 500 ms so first words are not clipped</td></tr><tr><td><strong>speech detection</strong></td><td>cpu</td><td>an energy gate with an adaptive noise floor starts and ends phrases. no speech classifier is wired in.</td></tr><tr><td><strong>warm engine</strong></td><td>gpu</td><td>already loaded, so the first call starts at once</td></tr><tr><td><strong>state</strong></td><td>background</td><td>one update per frame, produced off the main actor</td></tr></tbody></table></div>
   </section>
 
   <section aria-labelledby="ways">
@@ -324,7 +353,7 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
 
   <section aria-labelledby="ceiling">
     <h2 id="ceiling">the decoder's ceiling</h2>
-    <p class="dim">the gpu on this mac measured about 91 gb/s of memory reads, below the chip's 120 gb/s spec. this is the fastest a 2-minute clip could decode from weight reads alone. the cost depends on how weights are stored, so 32-bit math can still run at the 16-bit ceiling.</p>
+    <p class="dim">the plan's estimate, from an early read test of about 91 gb/s on the m4, below the chip's 120 gb/s spec: the fastest a 2-minute clip could decode from weight reads alone. the cost depends on how weights are stored, so 32-bit math can still run at the 16-bit ceiling. measured since: the bandwidth kernel reads about 86 gb/s alone in a microbenchmark, and the layer matrices inside a real step about 77 gb/s (2.82 gb in 36.7 ms). one clip decodes at 19.9 to 21.8 steps per second, against a ceiling near 26 with a short context and near 20 with a long one.</p>
     <div class="bars panel">
       <div class="bar-row"><span>16-bit weights, batched</span><div class="bar" style="width:100%"></div><span>~7.8x realtime</span></div>
       <div class="bar-row"><span>32-bit weights, batched</span><div class="bar" style="width:50%"></div><span>~3.9x realtime</span></div>
@@ -333,8 +362,8 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
     </div>
     <p>a wide batch does not make one clip faster than this. it lets several clips share the same weight reads, so total throughput rises until compute or cache traffic becomes the limit.</p>
     <p>the exact path keeps a 32-bit cache, about 229 kb per context token, or about 0.46 gb per step for a 2-minute piece. this is why long audio prefers shorter pieces. the clip also spends an estimated 2-5 s in prefill plus the encoder, so the 4-6x estimate is closer to a best case.</p>
-    <h3 style="margin-top:32px">what to expect</h3>
-    <div class="table-wrap" tabindex="0" role="region" aria-label="estimated speed on this mac"><table><thead><tr><th scope="col">path</th><th scope="col">matches reference</th><th scope="col">estimated speed</th></tr></thead><tbody><tr><td><strong>16-bit weights, 32-bit math, 3 beams</strong></td><td>expected, golden test decides</td><td>~4-6x realtime</td></tr><tr><td><strong>16-bit weights and math, 3 beams</strong></td><td>only if margin and golden test pass</td><td>~4-6x realtime</td></tr><tr><td><strong>32-bit weights and math, 3 beams</strong></td><td>yes, the fallback</td><td>~3x realtime</td></tr><tr><td><strong>batch of files, exact path</strong></td><td>golden test decides</td><td>~12-20x total</td></tr><tr><td><strong>8-bit, greedy</strong></td><td>no, a lower-precision baseline</td><td>~10-15x realtime</td></tr></tbody></table></div><p class="dim small">estimates for a warm run on this fanless m4 macbook air, at about 3.4 tokens per second of speech. the 8-bit row scales <a href="https://github.com/ljho01/qwen3-asr-opt" target="_blank" rel="noopener noreferrer">a published 33x run on an m4 pro</a> by memory bandwidth. the batch row is the least certain, because it depends on gpu compute and cache traffic. long runs may be slower once the air gets hot.</p>
+    <h3 style="margin-top:32px">what was expected, and what was measured</h3>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="estimated speed on this mac"><table><thead><tr><th scope="col">path</th><th scope="col">estimated</th><th scope="col">measured</th></tr></thead><tbody><tr><td><strong>16-bit weights, 32-bit math, 3 beams</strong></td><td>~4-6x realtime</td><td>the default. passes the golden test. 4.24x, 6.21x and 6.69x on the short, medium and long clips in the newest passing run.</td></tr><tr><td><strong>16-bit weights and math, 3 beams</strong></td><td>~4-6x realtime</td><td>not built for the decoder. the 16-bit neural engine encoder used 35 to 44 times the safety margin.</td></tr><tr><td><strong>32-bit math, before the matrix kernel</strong></td><td>~3x realtime</td><td>2.4x on the long clip in the first complete run</td></tr><tr><td><strong>batch of files, exact path</strong></td><td>~12-20x total</td><td>11.0x to 12.7x for twelve 11-second clips at 12 rows, in one try. wider than 12 rows was slower.</td></tr><tr><td><strong>8-bit, greedy</strong></td><td>~10-15x realtime</td><td>not built. it would not be exact.</td></tr></tbody></table></div><p class="dim small">estimates were for a warm run on a fanless m4 macbook air with 32 gb, at about 3.4 tokens per second of speech. the 8-bit row scaled <a href="https://github.com/ljho01/qwen3-asr-opt" target="_blank" rel="noopener noreferrer">a published 33x run on an m4 pro</a> by memory bandwidth. measured numbers vary from run to run, see the performance page.</p>
   </section>
 
   <section aria-labelledby="threads">
@@ -345,7 +374,7 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
         <tbody>
           <tr><td><strong>main thread</strong></td><td>drawing only, at most one text update per frame</td></tr>
           <tr><td><strong>audio thread</strong></td><td>copies microphone samples into a lock-free ring buffer</td></tr>
-          <tr><td><strong>pipeline</strong></td><td>every stage, joined by bounded queues, with one owner per chip</td></tr>
+          <tr><td><strong>background</strong></td><td>every stage. one host owns the engine and runs its gpu work. the mel splits across cpu cores.</td></tr>
           <tr><td><strong>low priority</strong></td><td>download, convert, load, warm-up, logs</td></tr>
         </tbody>
       </table>
@@ -357,21 +386,21 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
     <ol class="rules">
       <li><strong>it is exact.</strong> it passes the golden test on all three clips, or it is out.</li>
       <li><strong>it wins the task's number.</strong> throughput, speed or latency.</li>
-      <li><strong>on a tie, the npu wins.</strong> a tie is within 3%.</li>
+      <li><strong>on a tie, the npu wins.</strong> a tie is within 3%. no neural engine path has passed rule 1 yet.</li>
     </ol>
   </section>
 
   <section aria-labelledby="order">
     <h2 id="order">build order</h2>
     <ol class="rules">
-      <li><strong>run the one-layer benchmark.</strong> it measures the real ceiling across chips, batch width, context length and prefill.</li>
-      <li><strong>build the full 32-bit path</strong> with batched beams, so logic bugs are separate from precision bugs.</li>
-      <li><strong>add the beam ancestry cache,</strong> so beam history is never copied.</li>
-      <li><strong>switch to 16-bit weights</strong> with 32-bit math and cache.</li>
-      <li><strong>widen the batch</strong> and refill its slots.</li>
-      <li><strong>race the encoder</strong> on the npu and gpu, then move it ahead.</li>
-      <li><strong>test pure 16-bit math.</strong> it stays only if it passes the golden test and the safety margin.</li>
-      <li><strong>turn on the scheduler,</strong> starting from the sizes above and tuning them with measurements.</li>
+      <li><strong>run the one-layer benchmark.</strong> done. the bandwidth kernel on raw bf16 weights won the step, and apple's kernel won many-row products.</li>
+      <li><strong>build the full 32-bit path</strong> with batched beams. done, and it passed the golden test on its first complete run.</li>
+      <li><strong>add the beam ancestry cache,</strong> so beam history is never copied. done.</li>
+      <li><strong>switch to 16-bit weights</strong> with 32-bit math and cache. done: weights are read as stored and widened in the kernel.</li>
+      <li><strong>widen the batch</strong> and refill its slots. done, up to 12 rows, with the three-row kernel.</li>
+      <li><strong>race the encoder</strong> on the npu and gpu. done: the gpu won on exactness, and working ahead was not built.</li>
+      <li><strong>test pure 16-bit math.</strong> the neural engine encoder failed the margin. not tried for the decoder.</li>
+      <li><strong>turn on the scheduler.</strong> done, with limits derived from the device. reading pieces in groups is built in the engine and not used.</li>
     </ol>
   </section>
 
@@ -384,29 +413,29 @@ const loop = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke
 
 const groups = [
   { name: 'prepare audio', when: 'once per clip', steps: [
-    ['file decode', 'one file per core. it is parsing, so it stays on the cpu.', '-', '-', 'run'],
-    ['resample', 'fixed chunks in 32-bit across cores. the work is too small to be worth moving.', '-', '-', 'parallel'],
-    ['mel', '128 bins every 10 ms in 32-bit across cores, then one loudness floor for the clip.', '-', '-', 'parallel'],
+    ['file decode', 'core audio reads the file on the cpu. outside the exactness contract.', '-', '-', 'run'],
+    ['resample', 'to 16 khz mono in 32-bit on the cpu. also outside the contract.', '-', '-', 'run'],
+    ['mel', '128 bins every 10 ms in 32-bit, split across cores, then one loudness floor for the clip, as the reference feature extractor computes it.', '-', '-', 'parallel'],
   ]},
-  { name: 'encode', when: 'once per piece, in batched blocks', steps: [
-    ['conv front', 'independent 1-second pieces run as one batch, 13 tokens per second.', 'race', 'race', 'backup'],
-    ['encoder', '24 layers on fixed 8-second blocks of 104 tokens with a mask. blocks batch together and run ahead of the decoder.', 'race', 'race', 'backup'],
-    ['projector', 'in the same graph as the encoder, so no data moves between them.', 'race', 'race', 'backup'],
-    ['audio prefill', 'the decoder reads the prompt and all audio tokens once, then every beam shares that cache.', 'test', 'first', 'test'],
+  { name: 'encode', when: 'once per piece', steps: [
+    ['conv front', 'three convolutions on 1-second chunks, 13 tokens each, in groups of chunks per command buffer derived from the device. the projection out of it runs once over the whole clip.', 'pin', 'runs', '-'],
+    ['encoder', '24 layers, attention inside 8-second blocks of 104 tokens. products of 32 rows or more run on apple\'s matrix kernel with weights widened one matrix at a time.', 'pin', 'runs', '-'],
+    ['projector', 'right after the encoder, on the same chip, so no data moves between them.', 'pin', 'runs', '-'],
+    ['audio prefill', 'the prompt and all audio tokens in one pass on apple\'s matrix kernel, attention as whole-square products per head. every beam shares that cache.', '-', 'runs', '-'],
   ]},
   { name: 'decode', when: 'repeats for every token, up to 512', steps: [
-    ['token lookup', 'inside the decoder graph, for the newest token of each beam.', 'test', 'first', 'test'],
-    ['decoder', '28 layers on one chip, with raw 16-bit weights and 32-bit math and cache. all beams and pieces run as one wide batch, so each step reads the weights once.', 'test', 'first', 'test'],
-    ['output head', 'on the same chip as the decoder, sharing weights with the token table.', 'test', 'first', 'test'],
-    ['token bans and top-k', 'full-vocabulary log-softmax, then fixed bans, then the top 9 per beam, with a full-row fallback if the repeat ban empties it.', 'test', 'first', 'test'],
-    ['beam search', 'repeat bans over the whole sequence and accumulated scoring run across beams, then the ancestry table is updated so beam history is never copied.', '-', '-', 'parallel'],
+    ['token lookup', 'for the newest token of each row, inside the step.', '-', 'runs', '-'],
+    ['decoder', '28 layers, raw bf16 weights widened in the kernel, 32-bit math and cache. every beam and piece is one batch of up to 12 rows. the three-row kernel shares each weight read across three rows. a cpu decoder was measured at about 7 steps per second.', '-', 'runs', 'tried'],
+    ['output head', 'on the gpu with the decoder, through the same three-row kernel.', '-', 'runs', '-'],
+    ['log-softmax, bans and top-k', 'the logits come back to the cpu. log-softmax in 32-bit rounded the way torch\'s arm64 kernels round, the no-repeat and token bans, then the top candidates over all beams in torch\'s order for ties.', '-', '-', 'run'],
+    ['beam search', 'picks the running beams and the finished set as transformers does, then updates the ancestry table so beam history is never copied.', '-', '-', 'run'],
   ]},
   { name: 'finish', when: 'once per clip', steps: [
-    ['tokenizer and text', 'turns tokens into text and joins the pieces of long files.', '-', '-', 'run'],
+    ['tokenizer and text', 'turns tokens into text, applies the reference\'s output parsing, and joins the pieces of long files.', '-', '-', 'run'],
   ]},
 ];
 
-const dots = (n, g, c) => `<b aria-hidden="true"><i class="${n === 'race' ? 'n' : 'x'}"></i><i class="${g === 'race' || g === 'first' ? 'g' : 'x'}"></i><i class="${c === 'run' || c === 'parallel' ? 'c' : 'x'}"></i></b>`;
+const dots = (n, g, c) => `<b aria-hidden="true"><i class="${n === 'race' ? 'n' : 'x'}"></i><i class="${g === 'race' || g === 'first' || g === 'runs' ? 'g' : 'x'}"></i><i class="${c === 'run' || c === 'parallel' ? 'c' : 'x'}"></i></b>`;
 const flow = document.getElementById('flow');
 flow.innerHTML = groups.map((g, i) => `
   <div class="flow-group">
@@ -419,6 +448,9 @@ const mark = (value, chip) => {
   if (value === 'race') return `<span class="mark race-${chip}">race</span>`;
   if (value === 'first') return `<span class="mark race-${chip}">first</span>`;
   if (value === 'test') return '<span class="back">test</span>';
+  if (value === 'runs') return `<span class="mark race-${chip}">runs it</span>`;
+  if (value === 'pin') return '<span class="back">pin only</span>';
+  if (value === 'tried') return '<span class="back">tried</span>';
   if (value === 'run') return '<span class="mark run-c">runs it</span>';
   if (value === 'parallel') return '<span class="mark run-c">parallel</span>';
   if (value === 'backup') return '<span class="back">backup</span>';
@@ -461,7 +493,7 @@ const buildPacks = [
   ]},
   { name: 'batched beams', note: 'three beams share every weight read. the encoder finishes first, because the decoder needs all the audio tokens.', tiles: beams },
   { name: 'wide batch', note: 'pieces x and y decode in the same call, so one weight read does the work of both.', tiles: [...start, ...cycle(3, 11, both)] },
-  { name: 'combined', note: 'the target. when x ends, z takes its slot at once, and the encoder has already prepared z on the other chip.', tiles: combinedTiles },
+  { name: 'combined', note: 'the design. when x ends, z takes its slot at once. the plan had the encoder prepare z on another chip. today z is encoded on the gpu between steps.', tiles: combinedTiles },
 ];
 
 const workloadPacks = [
@@ -473,7 +505,7 @@ const workloadPacks = [
     ...T('m', 0, CPU), ...T('m', 1, CPU), ...T('e', 1, NPU), ...T('e', 2, NPU), ...T('p', 3, X), ...cycle(4, 11, (s, c) => T(`d${s}`, c, X)),
   ]},
   { name: 'very long', note: 'too long for one pass, so it is split. pieces flow through one wide batch and refill its slots.', tiles: combinedTiles },
-  { name: 'realtime', note: 'only the newest audio and the unsettled tail (t). small, top-priority calls that never wait for a batch.', tiles: [0, 4, 8].flatMap(c => [
+  { name: 'realtime', note: 'the open phrase and its unsettled tail (t), at live priority. each pass encodes the phrase again, which is the longest wait between live updates.', tiles: [0, 4, 8].flatMap(c => [
     ...T('m', c, [11]), ...T('e', c + 1, [0]), ...T('t', c + 2, [4]), ...T('b', c + 3, [11]),
   ])},
   { name: 'under load', note: 'the machine got busy or hot, so the batch narrows and y waits in the queue. the answer does not change.', tiles: [
@@ -545,8 +577,8 @@ document.getElementById('way-grid').innerHTML = [
   way('across time', 'cut audio into fixed blocks that run together. used by the conv front and encoder.', fill([0,1,2,3,4,5,6,7], [1], 'n')),
   way('across beams', 'three beams run as one batch and share one audio cache. used by the decoder.', fill([0,1,2,3,4,5,6,7], [0,1,2], 'g')),
   way('across pieces', 'pieces decode in one call, and a finished piece hands its slot to the next.', [...fill([0,1,2], [0], 'g'), ...fill([0,1,2,3,4], [1], 'g'), ...fill([0,1,2,3], [2], 'g')]),
-  way('across chips', 'one chip prepares the next piece while another decodes. this helps across pieces, not inside one clip.', [...fill([0,1,2,3,4], [0], 'n'), ...fill([2,3,4,5,6,7], [2], 'g')]),
-  way('across cores', 'the cpu takes parallel work: file decode, mel when it wins, beam bookkeeping.', fill([0,1,2], [0,1,2], 'c')),
+  way('across chips', 'one chip prepares the next piece while another decodes. not used today: the neural engine encoder failed the exactness bar.', [...fill([0,1,2,3,4], [0], 'n'), ...fill([2,3,4,5,6,7], [2], 'g')]),
+  way('across cores', 'the cpu takes parallel work: the mel splits across cores. search runs beside the gpu.', fill([0,1,2], [0,1,2], 'c')),
   way('across memory', 'chips share weights and audio tokens without copies, and beam history is never copied.', [...fill([0,1,2,3,4,5,6,7], [0], 'n'), ...fill([0,1,2,3,4,5,6,7], [1], 'c'), ...fill([0,1,2,3,4,5,6,7], [2], 'g')]),
 ].join('');
 </script>

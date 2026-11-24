@@ -451,7 +451,7 @@ struct GoldenTests {
         }
         log["clips"] = perClip
 
-        // any batch or load: all three in one wide batch, then six pieces through a batch that
+        // any batch or load: all three in one wide batch, then five pieces through a batch that
         // only fits two, so slots are refilled mid-flight. scores must stay bit-identical.
         await GoldenProbe.setMaxRows(12)
         clock = now()

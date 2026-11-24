@@ -2,14 +2,55 @@
 
 ## unreleased
 
-- the sdk and the playground build for ios and ipados as well as macos. every limit is derived from the device at load: memory headroom, core counts, the gpu's buffer and working-set sizes, the neural engine.
-- a second bandwidth kernel computes three rows per thread, bit-identical to the first. twelve medium clips at once go from about 7x to 12x realtime.
-- live drafts grow token by token: an update every 50 to 70 ms at the median, where one used to arrive only when a pass ended.
-- in full screen the toolbar steps aside, so no bar is drawn behind it.
-- a file that fits in one pass now reports progress all the way through: the encoder, the prefill, then every decoder step against an estimate of its length.
-- `TranscriptionJob.updates` streams the text of a file or a recording while it is transcribed: finished pieces settled, the rest a draft. the playground shows it.
-- `Recorder.drafts` shows draft text while recording, from quick passes over the audio so far. `options.recordDrafts` turns it off. the transcript still comes from one exact pass after stop.
-- checked on an iphone 17 pro: the three golden clips give the reference text, at 2.9x, 3.9x and 4.3x realtime from a fresh launch.
+### fixes
+
+- the host no longer hangs when the model is unloaded while a piece is being read in. pieces being read in count as busy, so an unload waits for them.
+- `keepWarm = .never` now lets go of the model after listen and between back-to-back jobs, and the next job loads it again.
+- switching to another model while work is running is refused with an error, instead of swapping the engine under that work.
+- a `Recorder` or `LiveSession` that is let go without `stop()`, `finish()` or `cancel()` now stops capture and ends its job. a `LiveSession` held only through its `events` stream is cancelled when the session is let go.
+- the model store hashes a weights file that is already present before it can delete it, so a good file is never removed unchecked.
+- a `maxTokens` the caller sets is now a cap: the piece stops there and is not split. the default, the checkpoint's 512, still splits and decodes again.
+- the playground never writes over recents or settings it could not read. an unreadable file is moved aside (the last five kept), a rolling backup is written before each overwrite, one bad entry does not cost the others, and nothing is written before the first read ends.
+- allocation failures in the engine throw instead of switching to another kernel, so they can no longer change bits silently. every tensor's shape and size is checked against `config.json` at load.
+
+### additions
+
+- `TranscriptionJob.updates` and `latestUpdate` stream the text of a file or a recording while it is transcribed: finished pieces settled, the rest a draft. `TranscriptionUpdate` holds `settled`, `draft` and `text`.
+- `TranscriptionJob.progress` moves inside a piece too: the encoder, the prefill, then every decoder step against an estimate of its length.
+- `Recorder.drafts` and `latestDraft` show draft text while recording, from quick greedy passes over the audio so far. `FourierOptions.recordDrafts` turns them off. the transcript still comes from one exact pass after stop.
+- live drafts grow token by token: an update every 50 to 70 ms at the median in one try, where one used to arrive only when a pass ended.
+- `TranscriptPiece.isExact`: false when a live phrase's exact pass failed twice and its settled live text stands in. a failed exact pass for a live phrase is now retried once.
+- `ComputeOptions.resolvedPlacement` shows the chip each stage runs on for a set of options. every `compute.policy` resolves to the gpu for the encoder and decoder. only a pin in `chips` moves a stage.
+- `TranscriptMetrics.realtimeSpeed` and `timeToFirstText` are measured from when the engine was ready and the audio read, so a cold first call's prepare is not counted. `elapsed` is the whole call.
+- `FourierMetrics.chipBusy` has no neural engine key, rather than 0. gpu busy is the wall time from commit to completion of its work. `placement` in the state and the metrics is the configured placement, not a measurement.
+- `FourierMetrics.device` reports what the engine read about the device and the limits it derived.
+- `fourierFollowsNewest()` in `FourierKitUI` keeps the end of a scroll view in view while text streams in, and lets go when the reader scrolls up. live text in the playground follows the newest words.
+- the sdk and the playground build for ios and ipados as well as macos. every limit is derived from the device at load: cache slots, batch rows, the encoder's conv group, scratch memory and the piece length for long audio.
+- the playground: deleted transcripts go to recently deleted for 30 days and can be restored. a stop bar follows a running capture on every other screen. after a failed transcription of a recording, the audio is kept and can be retried or saved. automated launches (any `-fourier` argument) use their own recents file. in full screen the toolbar steps aside. the modes are listed as listen, record, transcribe.
+- a device build reads the team id from `FourierPlayground/Local.xcconfig`, which git ignores. `Local.example.xcconfig` shows what to fill in.
+
+### engine
+
+- a second bandwidth kernel computes three rows per thread, bit-identical to the first. twelve medium clips at once went from about 7x to 12x realtime in one try.
+- the encoder's result no longer depends on the conv group size: the projection out of the conv front runs once over every chunk of the clip. the medium and long clips' encoder bits changed with this. tokens and candidates did not.
+- a decoder step never uses apple's matrix kernel, whatever the batch width allowed.
+- `prefill(pieces:)` in the engine reads several pieces in one prefill, bit-identical to reading each alone. it cut gpu time by 27 to 39 percent for groups of short pieces in one try. the scheduler does not use it: a try that read waiting pieces together gave no gain for twelve clips at once.
+
+### golden test
+
+- the ten ranked candidates of every step are compared, so the cut between the 9th and 10th is covered, and the margin now also covers the finished-set ranking and the stop heuristic.
+- every total batch width of 1, 2, 3, 4, 5, 7, 8, 10, 11 and 12 rows, with beam counts from 1 to 4 at both edges of the batch, is checked bit for bit against the clip alone.
+- the hashes of the clip files, the decoded samples and the tensor files are checked, and the golden set must be validated: each clip passed the 64-bit cross-check. `make_golden.py` writes into a staging folder and only moves the set into place when every clip passed, and takes `--output`, `--skip-float64` and `--unvalidated`.
+- a run that fails or stops early is still logged.
+- clip lengths the reference never saw (not a multiple of 160 samples, or under 0.5 s) are run and must end on a stop token. they are not compared to the reference.
+
+### measured elsewhere
+
+- on an iphone 17 pro the three golden clips gave the reference text at 2.9x, 3.9x and 4.3x realtime from fresh launches. this was before the engine changes above, and checked by text only, not by the golden test.
+
+### docs
+
+- every doc brought in line with the code: the exactness claim says what the golden test compares and what it does not cover, the api page matches the public declarations, and the plan says what changed from it.
 
 ## 0.0.2
 
