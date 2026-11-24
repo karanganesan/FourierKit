@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>fourier: architecture</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root {
+  color-scheme: dark;
+  --w8: rgb(255 255 255 / .08);
+  --w16: rgb(255 255 255 / .16);
+  --w24: rgb(255 255 255 / .24);
+  --w56: rgb(255 255 255 / .56);
+  --w64: rgb(255 255 255 / .64);
+  --npu: #fff;
+  --gpu: rgb(255 255 255 / .56);
+  --cpu: rgb(255 255 255 / .16);
+  --ease: cubic-bezier(.23, 1, .32, 1);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-feature-settings: 'liga' 1, 'calt' 1;
+}
+@supports (font-variation-settings: normal) {
+  :root { font-family: InterVariable, Inter, -apple-system, BlinkMacSystemFont, sans-serif; }
+}
+* { box-sizing: border-box; }
+html { background: #000; -webkit-text-size-adjust: 100%; scroll-padding-top: 80px; }
+body {
+  margin: 0;
+  background: #000;
+  color: #fff;
+  font-size: 16px;
+  line-height: 24px;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+a { color: inherit; text-decoration: none; }
+@media (hover: hover) and (pointer: fine) { a:hover { text-decoration: underline; } }
+:focus-visible { outline: 2px solid rgb(255 255 255 / .48); outline-offset: 2px; }
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  gap: 8px;
+  padding: 16px max(24px, env(safe-area-inset-left));
+  background: rgb(0 0 0 / .8);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.top a {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  color: var(--w64);
+  font-size: 14px;
+}
+.top a[aria-current] { background: var(--w16); color: #fff; }
+main { width: min(100%, 1072px); margin: 0 auto; padding: 48px 24px 96px; }
+h1, h2, h3 { font-weight: 600; text-wrap: balance; margin: 0; }
+h1 { font-size: 48px; line-height: 56px; letter-spacing: -.032em; max-width: 800px; }
+h2 { font-size: 32px; line-height: 40px; letter-spacing: -.024em; margin-top: 96px; }
+h3 { font-size: 16px; line-height: 24px; }
+p, li { text-wrap: pretty; }
+p { margin: 16px 0 0; max-width: 720px; }
+.lead { font-size: 24px; line-height: 32px; letter-spacing: -.012em; color: var(--w64); margin-top: 24px; }
+.dim { color: var(--w64); }
+.small { font-size: 14px; line-height: 24px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+code { padding: 2px 4px; border-radius: 4px; background: var(--w8); }
+pre { margin: 24px 0 0; padding: 24px; overflow-x: auto; border-radius: 16px; background: var(--w8); line-height: 24px; }
+pre code { padding: 0; background: none; }
+.panel, pre, .table-wrap, .flow-group, .way, .tile i, .lane, .status { border-radius: 16px; }
+@supports (corner-shape: superellipse(1.74)) {
+  .panel, pre, .table-wrap, .flow-group, .way, .lane, .status { corner-shape: superellipse(1.74); border-radius: 24.46px; }
+  .tile i, code { corner-shape: superellipse(1.74); border-radius: 6.11px; }
+  .top a, button { corner-shape: round; }
+}
+.status { display: inline-block; margin-top: 24px; padding: 8px 16px; background: var(--w8); color: var(--w64); font-size: 14px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 32px; font-size: 14px; color: var(--w64); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend b { width: 16px; height: 16px; border-radius: 4px; }
+.n { background: var(--npu); } .g { background: var(--gpu); } .c { background: var(--cpu); }
+
+.flow { display: grid; grid-template-columns: 1fr 24px 1fr 24px 1.32fr 24px 1fr; align-items: stretch; gap: 8px; margin-top: 32px; }
+.flow-group { padding: 24px; background: var(--w8); }
+.flow-group h3 { margin-bottom: 8px; }
+.flow-group ol { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
+.flow-group li { display: flex; align-items: center; gap: 8px; }
+.flow-group li b { flex: none; display: inline-flex; gap: 2px; width: 32px; }
+.flow-group li b i { width: 8px; height: 8px; border-radius: 2px; }
+.flow-group .x { opacity: 0; }
+.arrow { align-self: center; justify-self: center; color: var(--w56); }
+.repeat { display: inline-flex; align-items: center; gap: 8px; color: var(--w64); font-size: 14px; }
+
+.table-wrap { margin-top: 24px; overflow-x: auto; background: var(--w8); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 24px; }
+th, td { padding: 12px 16px; text-align: left; vertical-align: top; }
+thead th { color: var(--w64); font-weight: 500; white-space: nowrap; }
+tbody tr:nth-child(odd) td, tbody tr:nth-child(odd) th { background: rgb(255 255 255 / .04); }
+.steps th[scope=row] { min-width: 288px; font-weight: 400; }
+.steps .num { display: inline-block; width: 24px; color: var(--w56); font-variant-numeric: tabular-nums; }
+.steps strong { font-weight: 600; }
+.steps small { display: block; margin: 4px 0 0 24px; color: var(--w64); font-size: 14px; line-height: 24px; }
+.group-row th { background: var(--w16) !important; font-weight: 600; }
+.chipcell { width: 88px; text-align: center; vertical-align: middle; }
+.mark { display: inline-flex; align-items: center; justify-content: center; min-width: 64px; height: 24px; padding: 0 8px; border-radius: 999px; font-size: 12px; line-height: 16px; }
+.race-n { background: var(--npu); color: #000; }
+.race-g { background: var(--gpu); color: #000; }
+.run-c { background: var(--w24); color: #fff; }
+.back { color: var(--w56); }
+.none { color: var(--w24); }
+
+.switch { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+button {
+  height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--w8);
+  color: var(--w64);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 120ms var(--ease), background-color 120ms var(--ease), color 120ms var(--ease);
+}
+button:active { transform: scale(.97); }
+button[aria-pressed=true] { background: #fff; color: #000; }
+@media (hover: hover) and (pointer: fine) { button[aria-pressed=false]:hover { background: var(--w16); color: #fff; } }
+.note { min-height: 48px; margin-top: 16px; color: var(--w64); }
+.packer { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; margin-top: 16px; }
+.lanes { position: relative; height: 312px; }
+.lane-labels { position: relative; height: 312px; font-size: 14px; color: var(--w64); }
+.lane-labels span { position: absolute; left: 0; display: flex; align-items: center; }
+.lane { position: absolute; left: 0; right: 0; background: var(--w8); }
+.free { display: flex; align-items: center; justify-content: center; color: var(--w56); font-size: 12px; }
+.tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(100% / 12);
+  height: 24px;
+  padding: 2px;
+  transition: transform 320ms var(--ease);
+  will-change: transform;
+}
+.tile i {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  transition: background-color 160ms var(--ease), color 160ms var(--ease);
+}
+.tile.static { transition: none; will-change: auto; }
+.tile.on-n i { background: var(--npu); color: #000; }
+.tile.on-g i { background: var(--gpu); color: #000; }
+.tile.on-c i { background: var(--w24); color: #fff; }
+
+.ways { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 24px; }
+.way { padding: 24px; background: var(--w8); }
+.way p { margin-top: 8px; font-size: 14px; color: var(--w64); }
+.mini { display: grid; gap: 2px; margin-bottom: 16px; height: 64px; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(3, 1fr); }
+.mini i { border-radius: 2px; background: rgb(255 255 255 / .04); }
+.mini .n { background: var(--npu); } .mini .g { background: var(--gpu); } .mini .c { background: var(--w24); }
+
+.bars { display: grid; gap: 16px; margin-top: 24px; padding: 24px; background: var(--w8); }
+.bar-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) 128px; align-items: center; gap: 16px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.bar { height: 24px; border-radius: 4px; background: var(--gpu); transform-origin: left; }
+.bar-row span:last-child { text-align: right; color: var(--w64); }
+
+ol.rules { margin: 24px 0 0; padding-left: 24px; max-width: 720px; }
+ol.rules li + li { margin-top: 8px; }
+footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
+
+/* plan page */
+.prose h2 { scroll-margin-top: 80px; }
+.prose ul, .prose ol { margin: 16px 0 0; padding-left: 24px; max-width: 720px; }
+.prose li + li { margin-top: 8px; }
+.prose li > ul, .prose li > ol { margin-top: 8px; }
+.prose strong { font-weight: 600; }
+.prose table code { white-space: nowrap; }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 32px; font-size: 14px; }
+.toc a { display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border-radius: 999px; background: var(--w8); color: var(--w64); }
+
+@media (max-width: 880px) {
+  h1 { font-size: 32px; line-height: 40px; }
+  h2 { font-size: 24px; line-height: 32px; margin-top: 64px; }
+  .lead { font-size: 16px; line-height: 24px; }
+  main { padding-top: 24px; }
+  .flow { grid-template-columns: 1fr; }
+  .arrow { transform: rotate(90deg); }
+  .ways { grid-template-columns: 1fr; }
+  .packer { grid-template-columns: 40px minmax(0, 1fr); }
+  .tile i { font-size: 8px; }
+  .bar-row { grid-template-columns: 48px minmax(0, 1fr) 96px; gap: 8px; }
+  .steps th[scope=row] { min-width: 224px; }
+  button { height: 48px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile { transition: opacity 160ms ease; }
+  button { transition: none; }
+  button:active { transform: none; }
+}
+</style>
+</head>
+<body>
+<nav class="top" aria-label="docs">
+  <a href="plan.html">plan</a>
+  <a href="architecture.html" aria-current="page">architecture</a>
+</nav>
+<main>
+  <h1>how fourier packs compute</h1>
+  <p class="lead">every step of inference, which chip runs it, and how the work is packed so nothing waits that doesn't have to.</p>
+  <p class="status">design only. nothing here is measured yet. the golden test picks the winners.</p>
+  <div class="legend" aria-label="chip legend">
+    <span><b class="n"></b>npu</span>
+    <span><b class="g"></b>gpu</span>
+    <span><b class="c"></b>cpu</span>
+  </div>
+
+  <section aria-labelledby="path">
+    <h2 id="path">the whole path</h2>
+    <p class="dim">npu and gpu race for every step they can run. the cpu takes parallel work and logic. the main thread only draws.</p>
+    <div class="flow" id="flow"></div>
+  </section>
+
+  <section aria-labelledby="steps">
+    <h2 id="steps">every step</h2>
+    <p class="dim"><strong>race</strong> means both chips get built and the faster exact one keeps the step. <strong>parallel</strong> means the cpu splits it across cores. <strong>backup</strong> runs only if the others fail the golden test.</p>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="every inference step by chip">
+      <table class="steps">
+        <thead><tr><th scope="col">step and how it is packed</th><th scope="col" class="chipcell">npu</th><th scope="col" class="chipcell">gpu</th><th scope="col" class="chipcell">cpu</th></tr></thead>
+        <tbody id="step-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="packing">
+    <h2 id="packing">same work, four packings</h2>
+    <p class="dim">three audio blocks, each with mel (m), encoder (e), decoder (d) and beam work (b). a column is one turn in order. it is not a timing.</p>
+    <div class="switch" id="switch" role="group" aria-label="choose a packing"></div>
+    <p class="note" id="note" aria-live="polite"></p>
+    <div class="packer">
+      <div class="lane-labels" id="lane-labels" aria-hidden="true"></div>
+      <div class="lanes" id="lanes" role="img" aria-label="schematic of work tiles arranged across npu, gpu, cpu and main thread lanes"></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="combined">
+    <h2 id="combined">the combined engine</h2>
+    <p class="dim">this is the goal: all of it at once. every chip has its next job ready before the current one ends, so no chip sits idle while work remains. the number on a tile is its batch, and a column is one turn in order, not a timing.</p>
+    <div class="packer">
+      <div class="lane-labels" id="combined-labels" aria-hidden="true"></div>
+      <div class="lanes" id="combined-lanes" role="img" aria-label="nine batches flowing through cpu, npu and gpu at the same time, with every chip busy after the first turns and the main thread free"></div>
+    </div>
+    <h3 style="margin-top:32px">how calls get packed</h3>
+    <ol class="rules">
+      <li><strong>keep every chip fed.</strong> the next batch is queued before the current one finishes.</li>
+      <li><strong>pack the calls.</strong> many pieces go into one gpu command buffer or one npu batch, and the next call is prepared while this one runs.</li>
+      <li><strong>fill the token gap.</strong> one stream must wait for its last token, so other pieces use the chip during that wait.</li>
+      <li><strong>never copy.</strong> chips hand off shared memory buffers.</li>
+      <li><strong>slow down, never overflow.</strong> bounded queues hold back the stage before a slow one.</li>
+      <li><strong>recover on its own.</strong> if a chip call fails or falls back, that piece reruns on the exact gpu path.</li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="ways">
+    <h2 id="ways">six ways to pack</h2>
+    <p class="dim">the engine combines these. each one is a bet the hill-climb can keep or drop.</p>
+    <div class="ways" id="way-grid"></div>
+  </section>
+
+  <section aria-labelledby="tasks">
+    <h2 id="tasks">packing by task</h2>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="packing by task">
+      <table>
+        <thead><tr><th scope="col">task</th><th scope="col">number that wins</th><th scope="col">how it packs</th></tr></thead>
+        <tbody>
+          <tr><td><strong>batch of files</strong></td><td>highest throughput</td><td>mel across cores, pieces decoded in batches, chips overlapped</td></tr>
+          <tr><td><strong>one file</strong></td><td>highest speed</td><td>blocks batched, beams batched, encoder overlaps decoder</td></tr>
+          <tr><td><strong>live</strong></td><td>lowest latency</td><td>newest block only, finished blocks cached, settled text prefilled, only the tail decoded</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="ceiling">
+    <h2 id="ceiling">the decoder's ceiling</h2>
+    <p class="dim">each decoder step reads its weights from memory. at the m4's 120 gb/s, that caps one stream no matter which chip runs it. these are estimates until measured.</p>
+    <div class="bars panel">
+      <div class="bar-row"><span>16-bit</span><div class="bar" style="width:100%"></div><span>~35 steps/s</span></div>
+      <div class="bar-row"><span>32-bit</span><div class="bar" style="width:49%"></div><span>~17 steps/s</span></div>
+    </div>
+    <p>this is why beams run as one batch. three beams read the weights once per step, so more work fits under the same ceiling.</p>
+  </section>
+
+  <section aria-labelledby="threads">
+    <h2 id="threads">threads</h2>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="what runs on each thread">
+      <table>
+        <thead><tr><th scope="col">where</th><th scope="col">what runs there</th></tr></thead>
+        <tbody>
+          <tr><td><strong>main thread</strong></td><td>drawing only, at most one text update per frame</td></tr>
+          <tr><td><strong>audio thread</strong></td><td>copies microphone samples into a lock-free ring buffer</td></tr>
+          <tr><td><strong>pipeline</strong></td><td>every stage, joined by bounded queues, with one owner per chip</td></tr>
+          <tr><td><strong>low priority</strong></td><td>download, convert, load, warm-up, logs</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="decides">
+    <h2 id="decides">what decides a placement</h2>
+    <ol class="rules">
+      <li><strong>it is exact.</strong> it passes the golden test on all three clips, or it is out.</li>
+      <li><strong>it wins the task's number.</strong> throughput, speed or latency.</li>
+      <li><strong>on a tie, the npu wins.</strong> a tie is within 3%.</li>
+    </ol>
+  </section>
+
+  <footer>part of the <a href="plan.html">fourier plan</a>.</footer>
+</main>
+
+<script>
+const arrow = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
+const loop = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>';
+
+const groups = [
+  { name: 'prepare audio', when: 'once per clip', steps: [
+    ['file decode', 'one file per core. it is parsing, so it stays on the cpu.', '-', '-', 'run'],
+    ['resample', 'fixed chunks. the cpu takes it across cores if moving data to a chip costs more than the work.', 'race', 'race', 'parallel'],
+    ['mel', '128 bins every 10 ms, in batched 1-second windows, then one loudness floor for the clip.', 'race', 'race', 'parallel'],
+  ]},
+  { name: 'encode', when: 'once per block', steps: [
+    ['conv front', 'independent 1-second pieces run as one batch, 13 tokens per second.', 'race', 'race', 'backup'],
+    ['encoder', '24 layers on fixed 8-second blocks of 104 tokens with a mask. blocks batch together.', 'race', 'race', 'backup'],
+    ['projector', 'in the same graph as the encoder, so no data moves between them.', 'race', 'race', 'backup'],
+  ]},
+  { name: 'decode', when: 'repeats for every token, up to 512', steps: [
+    ['token lookup', 'inside the decoder graph. audio tokens are spliced in once, then cached.', 'race', 'race', 'backup'],
+    ['decoder', '28 layers, whole on one chip. 3 beams run as one batch over one shared audio cache. the npu can run it as sequential pieces.', 'race', 'race', 'backup'],
+    ['output head', 'on the same chip as the decoder.', 'race', 'race', 'backup'],
+    ['token bans and top-k', 'fixed bans are masked on the chip, and only the best scores come back, with extras to survive the repeat ban.', 'race', 'race', 'backup'],
+    ['beam search', 'repeat bans and scoring run across beams, then the chip is told how to reorder its cache.', '-', '-', 'parallel'],
+  ]},
+  { name: 'finish', when: 'once per clip', steps: [
+    ['tokenizer and text', 'turns tokens into text and joins the pieces of long files.', '-', '-', 'run'],
+  ]},
+];
+
+const dots = (n, g, c) => `<b aria-hidden="true"><i class="${n === 'race' ? 'n' : 'x'}"></i><i class="${g === 'race' ? 'g' : 'x'}"></i><i class="${c === 'run' || c === 'parallel' ? 'c' : 'x'}"></i></b>`;
+const flow = document.getElementById('flow');
+flow.innerHTML = groups.map((g, i) => `
+  <div class="flow-group">
+    <h3>${g.name}</h3>
+    <span class="repeat">${g.name === 'decode' ? loop : ''}${g.when}</span>
+    <ol>${g.steps.map(s => `<li>${dots(s[2], s[3], s[4])}${s[0]}</li>`).join('')}</ol>
+  </div>${i < groups.length - 1 ? `<div class="arrow">${arrow}</div>` : ''}`).join('');
+
+const mark = (value, chip) => {
+  if (value === 'race') return `<span class="mark race-${chip}">race</span>`;
+  if (value === 'run') return '<span class="mark run-c">runs it</span>';
+  if (value === 'parallel') return '<span class="mark run-c">parallel</span>';
+  if (value === 'backup') return '<span class="back">backup</span>';
+  return '<span class="none" aria-label="not used">-</span>';
+};
+let number = 0;
+document.getElementById('step-rows').innerHTML = groups.map(g => `
+  <tr class="group-row"><th colspan="4" scope="colgroup">${g.name} <span class="dim">· ${g.when}</span></th></tr>
+  ${g.steps.map(s => `<tr><th scope="row"><span class="num">${++number}</span><strong>${s[0]}</strong><small>${s[1]}</small></th><td class="chipcell">${mark(s[2], 'n')}</td><td class="chipcell">${mark(s[3], 'g')}</td><td class="chipcell">${mark(s[4], 'c')}</td></tr>`).join('')}`).join('');
+
+const ROW = 24;
+const laneDefs = [['npu', 0, 3], ['gpu', 4, 3], ['cpu', 8, 3], ['main', 12, 1]];
+const lanes = document.getElementById('lanes');
+const labels = document.getElementById('lane-labels');
+laneDefs.forEach(([name, top, rows]) => {
+  const lane = document.createElement('div');
+  lane.className = 'lane' + (name === 'main' ? ' free' : '');
+  lane.style.top = `${top * ROW}px`;
+  lane.style.height = `${rows * ROW}px`;
+  if (name === 'main') lane.textContent = 'free, only drawing';
+  lanes.append(lane);
+  const label = document.createElement('span');
+  label.textContent = name;
+  label.style.top = `${top * ROW}px`;
+  label.style.height = `${rows * ROW}px`;
+  labels.append(label);
+});
+
+const ids = ['m1','e1','d1','b1','m2','e2','d2','b2','m3','e3','d3','b3'];
+const tiles = Object.fromEntries(ids.map(id => {
+  const el = document.createElement('div');
+  el.className = 'tile';
+  el.innerHTML = `<i>${id}</i>`;
+  lanes.append(el);
+  return [id, el];
+}));
+
+const packs = [
+  { name: 'one by one', note: 'the baseline. every block finishes before the next one starts, and most chips sit idle.', at: {
+    m1:[0,4], e1:[1,4], d1:[2,4], b1:[3,8], m2:[4,4], e2:[5,4], d2:[6,4], b2:[7,8], m3:[8,4], e3:[9,4], d3:[10,4], b3:[11,8] }},
+  { name: 'split chips', note: 'each stage runs on its best chip, for example npu encoder and gpu decoder. the order is unchanged.', at: {
+    m1:[0,4], e1:[1,0], d1:[2,4], b1:[3,8], m2:[4,4], e2:[5,0], d2:[6,4], b2:[7,8], m3:[8,4], e3:[9,0], d3:[10,4], b3:[11,8] }},
+  { name: 'overlap', note: 'mel runs across cpu cores, and one chip encodes the next block while another decodes the current one.', at: {
+    m1:[0,8], m2:[0,9], m3:[0,10], e1:[1,0], e2:[2,0], e3:[3,0], d1:[2,4], d2:[3,4], d3:[4,4], b1:[3,8], b2:[4,8], b3:[5,8] }},
+  { name: 'batched', note: 'blocks go through each chip together. the most compact shape, as long as memory bandwidth and the golden test allow it.', at: {
+    m1:[0,8], m2:[0,9], m3:[0,10], e1:[1,0], e2:[1,1], e3:[1,2], d1:[2,4], d2:[2,5], d3:[2,6], b1:[3,8], b2:[3,9], b3:[3,10] }},
+];
+
+const sw = document.getElementById('switch');
+const note = document.getElementById('note');
+const buttons = packs.map((pack, index) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = pack.name;
+  button.addEventListener('click', () => show(index));
+  sw.append(button);
+  return button;
+});
+function show(index) {
+  const pack = packs[index];
+  buttons.forEach((b, i) => b.setAttribute('aria-pressed', String(i === index)));
+  note.textContent = pack.note;
+  for (const id of ids) {
+    const [col, row] = pack.at[id];
+    tiles[id].style.transform = `translate(${col * 100}%, ${row * ROW}px)`;
+    tiles[id].className = `tile on-${row < 3 ? 'n' : row < 7 ? 'g' : 'c'}`;
+  }
+}
+show(2);
+
+const combined = document.getElementById('combined-lanes');
+const combinedLabels = document.getElementById('combined-labels');
+laneDefs.forEach(([name, top, rows]) => {
+  const lane = document.createElement('div');
+  lane.className = 'lane' + (name === 'main' ? ' free' : '');
+  lane.style.top = `${top * ROW}px`;
+  lane.style.height = `${rows * ROW}px`;
+  if (name === 'main') lane.textContent = 'free, only drawing';
+  combined.append(lane);
+  const label = document.createElement('span');
+  label.textContent = name;
+  label.style.top = `${top * ROW}px`;
+  label.style.height = `${rows * ROW}px`;
+  combinedLabels.append(label);
+});
+const place = (text, col, row) => {
+  const el = document.createElement('div');
+  el.className = `tile static on-${row < 3 ? 'n' : row < 7 ? 'g' : 'c'}`;
+  el.style.transform = `translate(${col * 100}%, ${row * ROW}px)`;
+  el.innerHTML = `<i>${text}</i>`;
+  combined.append(el);
+};
+for (let batch = 0; batch < 9; batch++) {
+  const n = batch + 1;
+  place(`m${n}`, batch, 8);
+  [0, 1, 2].forEach(row => place(`e${n}`, batch + 1, row));
+  [4, 5, 6].forEach(row => place(`d${n}`, batch + 2, row));
+  [9, 10].forEach(row => place(`b${n}`, batch + 3, row));
+}
+
+const way = (name, text, cells) => {
+  const map = {};
+  cells.forEach(([x, y, c]) => { map[`${x},${y}`] = c; });
+  let html = '';
+  for (let y = 0; y < 3; y++) for (let x = 0; x < 8; x++) html += `<i class="${map[`${x},${y}`] || ''}"></i>`;
+  return `<article class="way"><div class="mini" aria-hidden="true">${html}</div><h3>${name}</h3><p>${text}</p></article>`;
+};
+const fill = (xs, ys, c) => xs.flatMap(x => ys.map(y => [x, y, c]));
+document.getElementById('way-grid').innerHTML = [
+  way('across time', 'cut audio into fixed blocks that run together. used by the conv front and encoder.', fill([0,1,2,3,4,5,6,7], [1], 'n')),
+  way('across beams', 'three beams run as one batch and share one audio cache. used by the decoder.', fill([0,1,2,3,4,5,6,7], [0,1,2], 'g')),
+  way('across pieces', 'pieces of a long file decode together for throughput.', [...fill([0,1,2], [0], 'g'), ...fill([0,1,2,3,4], [1], 'g'), ...fill([0,1,2,3], [2], 'g')]),
+  way('across chips', 'one chip encodes the next block while another decodes this one.', [...fill([0,1,2,3,4], [0], 'n'), ...fill([2,3,4,5,6,7], [2], 'g')]),
+  way('across cores', 'the cpu takes parallel work: file decode, mel when it wins, beam bookkeeping.', fill([0,1,2], [0,1,2], 'c')),
+  way('across memory', 'chips read the same memory, so weights, cache and audio tokens are not copied.', [...fill([0,1,2,3,4,5,6,7], [0], 'n'), ...fill([0,1,2,3,4,5,6,7], [1], 'c'), ...fill([0,1,2,3,4,5,6,7], [2], 'g')]),
+].join('');
+</script>
+</body>
+</html>
