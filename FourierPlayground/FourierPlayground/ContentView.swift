@@ -14,7 +14,7 @@ struct ContentView: View {
             .background { TextPresence() }
             .toolbar {
                 ToolbarItem(placement: .navigation) {
-                    ToolIcon("sidebar", symbol: "sidebar.leading", help: "show or hide the sidebar") { app.showSidebar.toggle() }
+                    ToolIcon("sidebar", symbol: "sidebar.leading", help: "show or hide the sidebar", width: 40) { app.showSidebar.toggle() }
                 }
                 PlaygroundToolbar()
             }
@@ -105,13 +105,16 @@ struct ToolIcon: View {
     let symbol: String
     let help: String
     let action: () -> Void
+    /// 32 inside a group. a button alone in its own glass needs 40, or the glass squeezes into an oval.
+    var width: CGFloat = 32
     @Environment(\.isEnabled) private var enabled
     @State private var hovering = false
 
-    init(_ title: String, symbol: String, help: String, action: @escaping () -> Void) {
+    init(_ title: String, symbol: String, help: String, width: CGFloat = 32, action: @escaping () -> Void) {
         self.title = title
         self.symbol = symbol
         self.help = help
+        self.width = width
         self.action = action
     }
 
@@ -119,8 +122,8 @@ struct ToolIcon: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 16, weight: .medium))
-                .frame(width: 32, height: 32)
-                .contentShape(.circle)
+                .frame(width: width, height: 32)
+                .contentShape(.rect)
         }
         .buttonStyle(ToolIconStyle(hovering: hovering && enabled))
         .onHover { hovering = $0 }
@@ -137,7 +140,7 @@ private struct ToolIconStyle: ButtonStyle {
         configuration.label
             .foregroundStyle(Color.primary.opacity(enabled ? 1 : 0.4))
             .background {
-                Circle().fill(Color.primary.opacity(configuration.isPressed ? 0.16 : hovering ? 0.08 : 0))
+                Capsule().fill(Color.primary.opacity(configuration.isPressed ? 0.16 : hovering ? 0.08 : 0))
             }
     }
 }
@@ -148,6 +151,7 @@ private struct Sidebar: View {
     @Environment(AppModel.self) private var app
     @Environment(\.undoManager) private var undoManager
     @FocusState private var focused: Bool
+    @State private var pendingDelete: [UUID] = []
 
     /// every row in order, for the arrow keys
     private var order: [SidebarItem] {
@@ -213,19 +217,51 @@ private struct Sidebar: View {
         .onMoveCommand { direction in
             guard let index = order.firstIndex(of: app.selection) else { return }
             switch direction {
-            case .up where index > 0: app.selection = order[index - 1]
-            case .down where index < order.count - 1: app.selection = order[index + 1]
+            case .up where index > 0: app.pick(order[index - 1], command: false, shift: false)
+            case .down where index < order.count - 1: app.pick(order[index + 1], command: false, shift: false)
             default: break
             }
         }
-        .onDeleteCommand {
-            if case .recent(let id) = app.selection { delete(id) }
+        .onDeleteCommand(perform: deleteSelection)
+        .alert("delete \(pendingDelete.count) transcripts?", isPresented: Binding(get: { !pendingDelete.isEmpty }, set: { if !$0 { pendingDelete = [] } })) {
+            Button("delete", role: .destructive, action: deletePending)
+            Button("cancel", role: .cancel) { pendingDelete = [] }
+        } message: {
+            Text("they are removed from this mac. you can undo until you quit.")
+        }
+        // control a selects every recent, as command a does from the edit menu
+        .onKeyPress(keys: ["a"]) { press in
+            guard press.modifiers.contains(.control) || press.modifiers.contains(.command) else { return .ignored }
+            app.selectAllRecents()
+            return .handled
         }
         .accessibilityLabel("sidebar")
     }
 
     private func delete(_ id: UUID) {
         RecentActions.delete(id, app: app, undoManager: undoManager)
+    }
+
+    /// the delete key: the one selected transcript goes at once and can be undone. several picked
+    /// together ask first, because quitting the app drops undo and there is no other copy.
+    private func deleteSelection() {
+        let picked = app.recents.items.filter { app.selectedRecents.contains($0.id) }.map(\.id)
+        if picked.count > 1 {
+            pendingDelete = picked
+        } else if case .recent(let id) = app.selection {
+            delete(id)
+        }
+    }
+
+    private func deletePending() {
+        let picked = pendingDelete
+        pendingDelete = []
+        guard !picked.isEmpty else { return }
+        undoManager?.beginUndoGrouping()
+        for id in picked.reversed() { delete(id) }
+        undoManager?.endUndoGrouping()
+        undoManager?.setActionName("delete \(picked.count) transcripts")
+        app.selectedRecents = []
     }
 }
 
@@ -237,10 +273,16 @@ private struct SidebarRow<Content: View>: View {
     @ViewBuilder var content: Content
     @State private var hovering = false
 
+    private var isPicked: Bool {
+        if case .recent(let id) = item { return app.selectedRecents.contains(id) }
+        return false
+    }
+
     var body: some View {
-        let selected = app.selection == item
+        let selected = app.selection == item || isPicked
         Button {
-            app.selection = item
+            let flags = NSEvent.modifierFlags
+            app.pick(item, command: flags.contains(.command), shift: flags.contains(.shift))
         } label: {
             content
                 .fourierTextStyle(.body)
@@ -351,7 +393,7 @@ private struct PlaygroundToolbar: ToolbarContent {
         }
         ToolbarSpacer(.fixed, placement: .primaryAction)
         ToolbarItem(placement: .primaryAction) {
-            ToolIcon("stats", symbol: "chart.xyaxis.line", help: "show or hide live stats") { app.showStats.toggle() }
+            ToolIcon("stats", symbol: "chart.xyaxis.line", help: "show or hide live stats", width: 40) { app.showStats.toggle() }
         }
     }
 

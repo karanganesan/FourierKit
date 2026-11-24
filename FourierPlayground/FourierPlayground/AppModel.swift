@@ -163,6 +163,37 @@ final class AppModel {
     }
 
     /// the exact text the current screen shows, for copy, share and export
+    /// recents picked together, with select all or a command or shift click. empty when one row,
+    /// or none, is selected the ordinary way.
+    var selectedRecents: Set<UUID> = []
+
+    func selectAllRecents() {
+        selectedRecents = Set(recents.items.map(\.id))
+        if case .mode = selection, let first = recents.items.first { selection = .recent(first.id) }
+    }
+
+    /// a click on a sidebar row: plain picks one, command adds or removes one, shift picks a run
+    func pick(_ item: SidebarItem, command: Bool, shift: Bool) {
+        guard case .recent(let id) = item, command || shift else {
+            selectedRecents = []
+            selection = item
+            return
+        }
+        var picked = selectedRecents
+        if picked.isEmpty, case .recent(let current) = selection { picked = [current] }
+        if shift, case .recent(let anchor) = selection,
+           let from = recents.items.firstIndex(where: { $0.id == anchor }),
+           let to = recents.items.firstIndex(where: { $0.id == id }) {
+            picked.formUnion(recents.items[min(from, to)...max(from, to)].map(\.id))
+        } else if picked.contains(id), picked.count > 1 {
+            picked.remove(id)
+        } else {
+            picked.insert(id)
+        }
+        selectedRecents = picked.count > 1 ? picked : []
+        if !picked.contains(where: { .recent($0) == selection }) || !shift { selection = .recent(picked.contains(id) ? id : (picked.first ?? id)) }
+    }
+
     /// whether there is text to copy, share or export. stored, and only written when it flips, so
     /// the toolbar does not rebuild on every live update while text is streaming in.
     var hasText = false
@@ -173,7 +204,11 @@ final class AppModel {
         case .mode(.record): record.transcript?.text
         case .mode(.listen):
             listen.transcript?.text ?? listen.update.map { $0.text }.flatMap { $0.isEmpty ? nil : $0 }
-        case .recent(let id): recents.item(id)?.text
+        case .recent(let id):
+            // several picked: their texts in the order shown, a blank line between
+            selectedRecents.count > 1
+                ? recents.items.filter { selectedRecents.contains($0.id) }.map(\.text).joined(separator: "\n\n")
+                : recents.item(id)?.text
         }
     }
 

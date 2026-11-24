@@ -13,10 +13,8 @@ public enum FourierGlass {
     public static let panelRadius: CGFloat = 24
     /// padding inside a floating panel
     public static let panelPadding: CGFloat = 24
-    /// height of the progressive blur at the top and bottom of anything that scrolls
-    public static let edgeBlur: CGFloat = 40
-    /// its strength, as a share of the system's lightest blur at full
-    public static let edgeBlurStrength: Double = 0.8
+    /// height of the fade at the top and bottom of anything that scrolls
+    public static let edgeFade: CGFloat = 40
     /// height of the floating control bar
     public static let barHeight: CGFloat = 64
 }
@@ -56,7 +54,7 @@ extension View {
 
 extension View {
     /// soft edges on anything that scrolls up and down: what passes under the top or the bottom
-    /// blurs progressively, strongest at the very edge and gone a band's height in. an edge only
+    /// fades out progressively, gone at the very edge and whole a band's height in. an edge only
     /// shows while content is past it, and is as strong as how far past it is, so there is nothing
     /// at the top of a list or at its end. the top band reaches up under the toolbar, so rows never
     /// collide with its buttons or the window controls.
@@ -80,8 +78,9 @@ private struct ScrollEdges: ViewModifier {
             } action: { _, position in
                 state.moved(position)
             }
-            .overlay(alignment: .top) { if top { ScrollEdgeBand(state: state, edge: .top) } }
-            .overlay(alignment: .bottom) { if bottom { ScrollEdgeBand(state: state, edge: .bottom) } }
+            // the content itself fades out at an edge, instead of a blurred band laid over it. on a
+            // see-through window a band of material is lighter than what is around it and shows as a strip.
+            .mask { ScrollEdgeMask(state: state, top: top, bottom: bottom) }
     }
 }
 
@@ -98,7 +97,7 @@ private final class ScrollEdgeState {
     /// position alone sets the edges, with no animation of their own
     func moved(_ position: Position) {
         let scrolls = position.end > 4
-        let height = FourierGlass.edgeBlur
+        let height = FourierGlass.edgeFade
         let top = scrolls ? min(1, max(0, position.y) / height) : 0
         let bottom = scrolls ? min(1, max(0, position.end - position.y) / height) : 0
         guard top != topLevel || bottom != bottomLevel else { return }
@@ -111,54 +110,35 @@ private final class ScrollEdgeState {
     }
 }
 
-private struct ScrollEdgeBand: View {
+/// fades what scrolls to nothing at each edge, as far as there is more content past that edge.
+/// above the top band, under the toolbar, content is hidden entirely once it has scrolled there.
+private struct ScrollEdgeMask: View {
     let state: ScrollEdgeState
-    let edge: VerticalEdge
+    let top: Bool
+    let bottom: Bool
 
-    var body: some View {
-        let level = edge == .top ? state.topLevel : state.bottomLevel
-        GeometryReader { proxy in
-            // the band is its own height plus whatever bar covers this edge, so it starts at the
-            // window's edge and still reaches a full band's height into the visible content
-            let inset = edge == .top ? proxy.safeAreaInsets.top : proxy.safeAreaInsets.bottom
-            EdgeBand(edge: edge)
-                .frame(height: FourierGlass.edgeBlur + inset)
-                .frame(maxHeight: .infinity, alignment: edge == .top ? .top : .bottom)
-                .opacity(level)
-                .ignoresSafeArea(edges: edge == .top ? .top : .bottom)
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
-
-/// one edge's band: blurs that build toward the edge. every layer fades in on an eased ramp from
-/// where it starts to the edge, each stronger than the last and starting nearer the edge, so the
-/// blur deepens as the edge nears and there is no line where the band begins.
-private struct EdgeBand: View {
-    let edge: VerticalEdge
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    /// the system's blurs, lightest first, and where each begins: 0 is the band's inner side, 1 the edge
-    private let layers: [(Material, Double)] = [(.ultraThinMaterial, 0.0), (.thinMaterial, 0.35), (.regularMaterial, 0.65)]
-
-    private func ramp(from start: Double) -> [Gradient.Stop] {
+    /// an eased ramp between two opacities, so the fade has no visible start
+    private func ramp(from: Double, to: Double) -> [Gradient.Stop] {
         stride(from: 0.0, through: 1.0, by: 0.125).map { t in
-            .init(color: .black.opacity(t * t * (3 - 2 * t)), location: start + (1 - start) * t)
+            .init(color: .black.opacity(from + (to - from) * (t * t * (3 - 2 * t))), location: t)
         }
     }
 
     var body: some View {
-        let toward: (UnitPoint, UnitPoint) = edge == .top ? (.bottom, .top) : (.top, .bottom)
-        if !reduceTransparency {
-            ZStack {
-                ForEach(layers.indices, id: \.self) { index in
-                    Rectangle()
-                        .fill(layers[index].0)
-                        .mask(LinearGradient(stops: ramp(from: layers[index].1), startPoint: toward.0, endPoint: toward.1))
-                        .opacity(FourierGlass.edgeBlurStrength)
-                }
+        let topClear = top ? 1 - state.topLevel : 1
+        let bottomClear = bottom ? 1 - state.bottomLevel : 1
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                // whatever bar covers the top: nothing shows through it once content has scrolled under
+                Color.black.opacity(topClear).frame(height: proxy.safeAreaInsets.top)
+                LinearGradient(stops: ramp(from: topClear, to: 1), startPoint: .top, endPoint: .bottom)
+                    .frame(height: FourierGlass.edgeFade)
+                Color.black
+                LinearGradient(stops: ramp(from: 1, to: bottomClear), startPoint: .top, endPoint: .bottom)
+                    .frame(height: FourierGlass.edgeFade)
+                Color.black.opacity(bottomClear).frame(height: proxy.safeAreaInsets.bottom)
             }
+            .ignoresSafeArea()
         }
     }
 }

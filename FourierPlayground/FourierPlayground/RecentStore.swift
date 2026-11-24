@@ -77,9 +77,12 @@ final class RecentStore {
 
 /// the file itself, on its own actor so writes stay in order and off the main thread
 private actor RecentFile {
+    /// automated launches (the debug launch arguments) keep their own list, so test runs never
+    /// add to, or remove from, the transcripts a person made
     private var url: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("FourierPlayground/recents.json")
+        let name = LaunchOptions.current.isAutomated ? "recents.automation.json" : "recents.json"
+        return base.appendingPathComponent("FourierPlayground/\(name)")
     }
 
     func read() -> [RecentTranscript] {

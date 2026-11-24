@@ -43,6 +43,8 @@ private struct SettingsForm<Content: View>: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .fourierGlassWindow()
+        // no bar or line behind the tabs: they sit on the window like everything else
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
     }
 }
 
@@ -353,10 +355,19 @@ private struct ModelSettings: View {
                 Text("location")
             }
             Section {
-                TextField("revision", text: $app.settings.revision)
-                    .fourierTextStyle(.caption, numbers: .tabular)
-                TextField("sha256", text: $app.settings.sha256, prompt: Text("pinned"))
-                    .fourierTextStyle(.caption, numbers: .tabular)
+                // the label at the row size like every other row; the long value small, as the folder is
+                LabeledContent("revision") {
+                    TextField("revision", text: $app.settings.revision)
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .fourierTextStyle(.caption, numbers: .tabular)
+                }
+                LabeledContent("sha256") {
+                    TextField("sha256", text: $app.settings.sha256, prompt: Text("pinned"))
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .fourierTextStyle(.caption, numbers: .tabular)
+                }
                 Toggle("offline", isOn: $app.settings.offline)
             } header: {
                 Text("checkpoint")

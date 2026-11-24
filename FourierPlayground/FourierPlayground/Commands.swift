@@ -52,7 +52,10 @@ struct PlaygroundCommands: Commands {
             Button("paste") { Self.send("paste:") }
                 .keyboardShortcut("v")
             Button("delete") { Self.send("delete:") }
-            Button("select all") { Self.send("selectAll:") }
+            Button("select all") {
+                // in a text field it selects the text. anywhere else it selects every recent transcript.
+                if NSApp.keyWindow?.firstResponder is NSText { Self.send("selectAll:") } else { app.selectAllRecents() }
+            }
                 .keyboardShortcut("a")
             Divider()
             Button("copy transcript") {
