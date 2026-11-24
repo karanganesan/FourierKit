@@ -23,7 +23,7 @@ public enum FourierError: Error, Sendable, Hashable, LocalizedError, CustomStrin
     /// the downloaded weights do not match the pinned hash, even after a fresh download
     case hashMismatch
     case notEnoughDisk(needed: Int64, available: Int64)
-    /// offline mode is on and the model is not on this mac
+    /// offline mode is on and the model is not on this device
     case offlineModelMissing
     /// a revision other than the pinned one needs its own sha256 to be trusted
     case unverifiedRevision(String)
@@ -115,6 +115,8 @@ public enum FourierError: Error, Sendable, Hashable, LocalizedError, CustomStrin
         case HostFailure.cancelled: return .cancelled
         case HostFailure.notLoaded: return .engineFailure("the model is not loaded")
         case HostFailure.engine(let reason): return .engineFailure(reason)
+        case HostFailure.busy: return .engineFailure("another model is still running. wait for its work to end or cancel it before switching models")
+        case HostFailure.modelChanged: return .engineFailure("the model changed while this was running")
         case let error as AudioFileError:
             switch error {
             case .unreadable(let reason), .conversionFailed(let reason): return .unreadableAudio(reason)

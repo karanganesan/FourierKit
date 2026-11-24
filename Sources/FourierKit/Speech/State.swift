@@ -39,9 +39,10 @@ public struct FourierState: Sendable, Equatable {
     public var microphone: MicrophoneState = MicrophoneState()
     public var speech: SpeechActivity = .silent
     public var pressure: SystemPressure = .normal
-    /// planned chip for each stage
+    /// the chip each stage is set up to run on with the loaded engine (the shipped placement before
+    /// one loads): what was configured, not a measurement of where the work ran
     public var placement: [Stage: Chip] = [:]
-    /// precision for each stage
+    /// the precision each stage is set up to run in, the same way
     public var precision: [Stage: Precision] = [:]
     /// the last error that stopped prepare or a job, cleared by the next success
     public var error: FourierError?
@@ -101,7 +102,7 @@ public enum SystemPressure: String, Sendable, Hashable {
     case normal
     /// memory is getting tight
     case busy
-    /// the mac is hot
+    /// the device is hot
     case hot
     /// low power mode is on
     case lowPower
@@ -144,14 +145,16 @@ public struct FourierMetrics: Sendable, Equatable {
     public var maxBatchWidth: Int = 0
     public var queuedPieces: Int = 0
     public var activePieces: Int = 0
-    /// share of recent time each chip spent on engine calls, 0...1
+    /// share of the last two seconds each chip spent on engine calls, 0...1, from the engine's own
+    /// timing: the gpu as the wall time from committing its work to its completion, the cpu as the
+    /// time spent in mel and search. the neural engine has no measure and is absent, not 0.
     public var chipBusy: [Chip: Double] = [:]
     /// the app's physical footprint
     public var appMemory: UInt64 = 0
     public var weightMemory: UInt64 = 0
     /// decoder key-value cache in use
     public var cacheMemory: UInt64 = 0
-    /// what the engine measured on this device and the sizes it chose from that, nil until it loads
+    /// what the engine read about this device and the sizes it chose from that, nil until it loads
     public var device: DeviceReport?
 
     public init() {}

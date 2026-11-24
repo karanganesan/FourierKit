@@ -1,9 +1,13 @@
 import Foundation
 
 /// a running listen(). read `events` for live text; `finish()` returns the exact transcript.
+///
+/// keep the session while it runs: when the last reference to it goes away without `finish()` or
+/// `cancel()`, it is cancelled, the input stops and `events` ends.
 public final class LiveSession: Sendable {
     public let id: UUID
-    /// one reader at a time. cancelling the reading task does not stop the session; only finish() or cancel() do.
+    /// one reader at a time. cancelling the reading task does not stop the session; only finish(),
+    /// cancel() or letting go of the session do.
     public let events: LiveEvents
     private let engine: LiveEngine
     private let channel: EventChannel
@@ -13,6 +17,12 @@ public final class LiveSession: Sendable {
         self.engine = engine
         self.channel = channel
         events = LiveEvents(channel: channel)
+    }
+
+    deinit {
+        // a no-op once finish() or cancel() has run; the engine's tasks hold it only weakly
+        let engine = engine
+        Task.detached(priority: .userInitiated) { await engine.cancel() }
     }
 
     /// stops the input, waits for the last phrase's exact pass, ends the event stream and returns the final text.
@@ -200,7 +210,8 @@ actor LiveEngine {
     private var closed: [LivePhrase] = []
     private var lastClosedEnd = 0
     private var nextPhraseID = 0
-    private var exact: [(start: Int, task: Task<[Transcriber.Outcome], any Error>)] = []
+    /// each closed phrase's exact pass, by its first sample. a phrase whose pass fails falls back to its live text.
+    private var exact: [(start: Int, count: Int, phrase: Int, task: Task<[Transcriber.Outcome], any Error>)] = []
     /// the session's settled text; it is only ever appended to
     private var ledger = ""
     private var startsWithSpace: [Int32: Bool] = [:]
@@ -332,8 +343,20 @@ actor LiveEngine {
         switch options.finalPass {
         case .perPhrase:
             var outcomes: [Transcriber.Outcome] = []
-            for (start, task) in exact {
-                for var outcome in try await task.value {
+            for entry in exact {
+                let start = entry.start
+                let phraseOutcomes: [Transcriber.Outcome]
+                do {
+                    phraseOutcomes = try await entry.task.value
+                } catch {
+                    // the pass failed twice: the phrase's settled live text stands in, marked as not exact
+                    let text = closed.first { $0.id == entry.phrase }?.settled ?? ""
+                    let result = PieceResult(
+                        tokens: [], text: text, reachedStop: false, score: 0, promptLength: 0, audioTokens: 0,
+                        steps: 0, timings: PieceTimings(), candidates: [], widestBatch: 0)
+                    phraseOutcomes = [Transcriber.Outcome(range: 0..<entry.count, result: result, sent: now(), splitDepth: 0, exact: false)]
+                }
+                for var outcome in phraseOutcomes {
                     outcome.range = (outcome.range.lowerBound + start)..<(outcome.range.upperBound + start)
                     outcomes.append(outcome)
                 }
@@ -354,7 +377,7 @@ actor LiveEngine {
         stopping = true
         channel.finish()
         worker?.cancel()
-        for (_, task) in exact { task.cancel() }
+        for entry in exact { entry.task.cancel() }
         if let input { await input.stop() }
         ingestTask?.cancel()
         eventTask?.cancel()
@@ -467,9 +490,15 @@ actor LiveEngine {
         if options.finalPass == .perPhrase, !samples.isEmpty {
             let plan = finalPlan
             let task = Task.detached(priority: .userInitiated) {
-                try await Transcriber.decode(samples: samples, ranges: [0..<samples.count], plan: plan)
+                do {
+                    return try await Transcriber.decode(samples: samples, ranges: [0..<samples.count], plan: plan)
+                } catch {
+                    // one more try; a cancelled session does not retry
+                    try Task.checkCancellation()
+                    return try await Transcriber.decode(samples: samples, ranges: [0..<samples.count], plan: plan)
+                }
             }
-            exact.append((phrase.start, task))
+            exact.append((phrase.start, samples.count, phrase.id, task))
         }
         await runtime.setSpeech(.silent)
     }
@@ -527,9 +556,7 @@ actor LiveEngine {
         let heardAt = lastChunkTime
         let started = now()
         lastPassStart = started
-        var request = PieceRequest(
-            samples: slice(phrase.start..<end), language: draftPlan.language, context: draftPlan.context,
-            settings: draftPlan.settings, prefix: phrase.settled, priority: .live)
+        var request = draftPlan.request(slice(phrase.start..<end), prefix: phrase.settled, priority: .live)
         // tokens are shown as they are decoded, so text grows through a pass instead of landing at its end
         passCount += 1
         let pass = passCount
@@ -588,9 +615,7 @@ actor LiveEngine {
         defer { passing = false }
         var phrase = item.phrase
         if !item.samples.isEmpty, !stopped {
-            let request = PieceRequest(
-                samples: item.samples, language: draftPlan.language, context: draftPlan.context,
-                settings: draftPlan.settings, prefix: phrase.settled, priority: .live)
+            let request = draftPlan.request(item.samples, prefix: phrase.settled, priority: .live)
             if let result = try? await host.transcribe(request) {
                 let tail = strip(result.tokens)
                 if !tail.isEmpty { settle(&phrase, tokens: tail) }

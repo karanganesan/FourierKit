@@ -29,33 +29,45 @@ public struct TranscriptPiece: Sendable, Hashable {
     public var end: Duration
     /// the same range as 16 khz sample indices into the audio
     public var samples: Range<Int>
-    /// false if the piece hit the token limit and could not be split further
+    /// false if the piece ended without a stop token: it hit a `maxTokens` the caller set, or the
+    /// checkpoint's limit and could not be split further, or it is live text standing in (see `isExact`)
     public var reachedStop: Bool
+    /// false in a live session when this phrase's exact pass failed twice, so its settled live text
+    /// stands in. always true for files and recordings, which throw instead.
+    public var isExact: Bool
 
-    public init(text: String, samples: Range<Int>, reachedStop: Bool = true) {
+    public init(text: String, samples: Range<Int>, reachedStop: Bool = true, isExact: Bool = true) {
         self.text = text
         self.samples = samples
         self.start = .seconds(Double(samples.lowerBound) / 16_000)
         self.end = .seconds(Double(samples.upperBound) / 16_000)
         self.reachedStop = reachedStop
+        self.isExact = isExact
     }
 }
 
 public struct TranscriptMetrics: Sendable, Hashable {
-    /// seconds of audio per second of wall time, from the call to the result. for a live session,
-    /// where audio arrives in real time, it is the audio decoded over the time the engine worked on it.
+    /// seconds of audio per second of wall time, from the moment the engine was ready and the audio
+    /// read to the result, so a cold first call's prepare (or download) is not counted. for a live
+    /// session, where audio arrives in real time, it is the audio decoded over the time the engine
+    /// worked on it.
     public var realtimeSpeed: Double = 0
-    /// from the call to the first decoded token
+    /// from the moment the engine was ready and the audio read to the first decoded token. for a
+    /// live session, from the start of the session.
     public var timeToFirstText: Duration?
+    /// the whole call, prepare included
     public var elapsed: Duration = .zero
     /// tokens generated, without the prompt
     public var tokens: Int = 0
     public var decoderSteps: Int = 0
-    /// planned chip for each stage
+    /// the chip each stage was set up to run on when the transcript was made: what was loaded, not
+    /// a measurement of where the work ran
     public var placement: [Stage: Chip] = [:]
+    /// the precision each stage was set up to run in, the same way
     public var precision: [Stage: Precision] = [:]
     public var widestBatch: Int = 0
-    /// pieces decoded again after hitting the token limit
+    /// how many times a piece that hit the checkpoint's token limit was split in two and decoded
+    /// again. a `maxTokens` the caller set is a cap and never splits.
     public var tokenLimitSplits: Int = 0
     /// time spent in each stage, summed over pieces
     public var melTime: Duration = .zero
@@ -193,7 +205,7 @@ public enum LiveWarning: Sendable, Hashable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .fellBehind(let interval):
-            "the mac fell behind, so text now updates every \(interval.inMilliseconds) ms. no audio was dropped."
+            "\(DeviceWords.thisDevice) fell behind, so text now updates every \(interval.inMilliseconds) ms. no audio was dropped."
         case .audioDropped(let duration):
             "\(duration.inMilliseconds) ms of audio was lost."
         case .inputChanged(let lost):

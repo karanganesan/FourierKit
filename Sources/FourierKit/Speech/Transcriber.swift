@@ -7,13 +7,25 @@ struct DecodePlan: Sendable {
     var language: String
     var context: String?
     var priority: PieceRequest.Priority
+    /// the caller set `maxTokens`, so a piece that reaches it stops there instead of being split
+    var capped = false
+    /// the loaded model the settings came from
+    var model: URL?
+
+    /// a request for one piece of audio with these settings
+    func request(_ samples: [Float], prefix: [Int32] = [], priority: PieceRequest.Priority? = nil) -> PieceRequest {
+        PieceRequest(samples: samples, language: language, context: context, settings: settings, model: model,
+                     prefix: prefix, priority: priority ?? self.priority)
+    }
 
     /// the checkpoint's settings with only what the caller set changed. the defaults change nothing.
     static func make(_ decoding: DecodingOptions, priority: PieceRequest.Priority) async throws -> DecodePlan {
         guard let language = Prompt.languageName(for: decoding.language) else {
             throw FourierError.unsupportedLanguage(decoding.language)
         }
-        var settings = await EngineHost.shared.defaults
+        let host = EngineHost.shared
+        var settings = await host.defaults
+        let model = await host.modelDirectory
         switch decoding.search {
         case .automatic: break
         case .greedy: settings.numBeams = 1
@@ -26,7 +38,8 @@ struct DecodePlan: Sendable {
             settings.maxNewTokens = maxTokens
         }
         if let guardSize = decoding.repeatGuard { settings.noRepeatNgramSize = max(0, guardSize) }
-        return DecodePlan(settings: settings, language: language, context: decoding.context, priority: priority)
+        return DecodePlan(settings: settings, language: language, context: decoding.context, priority: priority,
+                          capped: decoding.maxTokens != nil, model: model)
     }
 }
 
@@ -40,6 +53,10 @@ enum Transcriber {
         /// when the piece was sent, for time to first text
         var sent: Double
         var splitDepth: Int
+        /// token-limit splits this outcome stands for: one on the first half of every split
+        var splits = 0
+        /// false when the exact pass failed and live text stands in for it
+        var exact = true
     }
 
     /// up to 120 s is one piece; longer audio is cut at quiet points.
@@ -53,7 +70,8 @@ enum Transcriber {
     }
 
     /// runs every range at once (the host batches them) and returns the outcomes in audio order.
-    /// a piece that hits the token limit is split at its quietest point and decoded again.
+    /// a piece that hits the checkpoint's token limit is split at its quietest point and decoded
+    /// again; one that hits a limit the caller set stops there. a piece whose gpu call fails runs once more.
     static func decode(samples: [Float], ranges: [Range<Int>], plan: DecodePlan,
                        draft: (@Sendable (Int, [Int32], Bool) -> Void)? = nil,
                        report: @escaping @Sendable (Int, Double) -> Void = { _, _ in }) async throws -> [Outcome] {
@@ -78,26 +96,36 @@ enum Transcriber {
         try Task.checkCancellation()
         let key = range.lowerBound
         let size = Double(range.count)
-        var building = PieceRequest(
-            samples: Array(samples[range]), language: plan.language, context: plan.context,
-            settings: plan.settings, priority: plan.priority)
+        var building = plan.request(Array(samples[range]))
         building.onProgress = { fraction in report(key, size * fraction) }
         if let draft { building.onTokens = { tokens in draft(key, tokens, false) } }
         let request = building
-        let sent = now()
-        let result = try await returningOnCancel { try await EngineHost.shared.transcribe(request) }
+        var sent = now()
+        let result: PieceResult
+        do {
+            result = try await returningOnCancel { try await EngineHost.shared.transcribe(request) }
+        } catch EngineFailure.gpu {
+            // a failed gpu call fails every piece that shared it; each gets one more try
+            try Task.checkCancellation()
+            report(key, 0)
+            draft?(key, [], false)
+            sent = now()
+            result = try await returningOnCancel { try await EngineHost.shared.transcribe(request) }
+        }
         await Runtime.shared.recordPiece(
             start: sent, end: now(), audioSeconds: Double(range.count) / 16_000,
             tokens: result.tokens.count, firstText: nil)
-        // a piece that never reached a stop token was cut by the limit, so it runs again in halves
-        if !result.reachedStop, depth < 6, range.count >= 2 * 16_000,
+        // a piece that never reached a stop token was cut by the checkpoint's limit, so it runs again in halves
+        if !result.reachedStop, !plan.capped, depth < 6, range.count >= 2 * 16_000,
            let (first, second) = AudioSplitter.split(samples: samples, range: range) {
             // the halves start again from nothing. the first one shares this piece's name.
             report(key, 0)
             draft?(key, [], false)
             async let a = decodeRange(samples: samples, range: first, plan: plan, depth: depth + 1, draft: draft, report: report)
             async let b = decodeRange(samples: samples, range: second, plan: plan, depth: depth + 1, draft: draft, report: report)
-            return try await a + b
+            var outcomes = try await a + b
+            if !outcomes.isEmpty { outcomes[0].splits += 1 }
+            return outcomes
         }
         report(key, size)
         draft?(key, result.tokens, true)
@@ -108,13 +136,20 @@ enum Transcriber {
         texts.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
+    /// - parameter started: when the call began, for `elapsed`
+    /// - parameter ready: when the engine was ready and the audio read, for speed and time to first
+    ///   text, so a cold first call does not count its prepare. nil is `started`.
     /// - parameter live: the audio arrived in real time, so wall-clock time says nothing about the
     ///   engine. speed is then the audio that was decoded over the time the engine spent on it.
-    static func transcript(outcomes: [Outcome], offset: Int = 0, audioSamples: Int, plan: DecodePlan, started: Double, live: Bool = false) -> Transcript {
-        let elapsed = now() - started
+    static func transcript(outcomes: [Outcome], offset: Int = 0, audioSamples: Int, plan: DecodePlan, started: Double,
+                           ready: Double? = nil, live: Bool = false) -> Transcript {
+        let end = now()
+        let elapsed = end - started
+        let ready = ready ?? started
+        let working = end - ready
         var metrics = TranscriptMetrics()
         metrics.elapsed = .seconds(elapsed)
-        metrics.realtimeSpeed = elapsed > 0 ? Double(audioSamples) / 16_000 / elapsed : 0
+        metrics.realtimeSpeed = working > 0 ? Double(audioSamples) / 16_000 / working : 0
         metrics.placement = Runtime.shared.placement.value
         metrics.precision = Runtime.shared.precision.value
         let eos = Set(plan.settings.eosTokenIDs)
@@ -128,8 +163,9 @@ enum Transcriber {
             metrics.encodeTime += .seconds(result.timings.encode)
             metrics.prefillTime += .seconds(result.timings.prefill)
             metrics.decodeTime += .seconds(result.timings.decode)
-            if outcome.splitDepth > 0 { metrics.tokenLimitSplits += 1 }
-            let firstText = outcome.sent - started + result.timings.firstToken
+            metrics.tokenLimitSplits += outcome.splits
+            guard outcome.exact else { continue }
+            let firstText = outcome.sent - ready + result.timings.firstToken
             first = min(first ?? firstText, firstText)
         }
         metrics.timeToFirstText = first.map { .seconds(max(0, $0)) }
@@ -144,7 +180,7 @@ enum Transcriber {
             TranscriptPiece(
                 text: outcome.result.text,
                 samples: (outcome.range.lowerBound + offset)..<(outcome.range.upperBound + offset),
-                reachedStop: outcome.result.reachedStop)
+                reachedStop: outcome.result.reachedStop, isExact: outcome.exact)
         }
         return Transcript(
             text: join(pieces.map(\.text)), language: plan.language, pieces: pieces,
@@ -242,9 +278,10 @@ public final class TranscriptionJob: Sendable {
         await runtime.update(job, phase: .reading)
         let samples = try await audio
         let plan = try await DecodePlan.make(options.decoding, priority: .file)
+        let ready = now()
         await runtime.update(job, phase: .running, progress: .some(0), audio: .seconds(Double(samples.count) / 16_000))
         guard !samples.isEmpty else {
-            return Transcriber.transcript(outcomes: [], audioSamples: 0, plan: plan, started: started)
+            return Transcriber.transcript(outcomes: [], audioSamples: 0, plan: plan, started: started, ready: ready)
         }
 
         let ranges = Transcriber.ranges(samples: samples, chunking: options.chunking)
@@ -285,7 +322,7 @@ public final class TranscriptionJob: Sendable {
             feed.send(fraction)
             Task { await runtime.update(job, progress: .some(fraction)) }
         }
-        let transcript = Transcriber.transcript(outcomes: outcomes, audioSamples: total, plan: plan, started: started)
+        let transcript = Transcriber.transcript(outcomes: outcomes, audioSamples: total, plan: plan, started: started, ready: ready)
         await runtime.recordLive(timeToFirstText: transcript.metrics.timeToFirstText)
         return transcript
     }

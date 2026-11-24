@@ -1,6 +1,6 @@
 import Foundation
 
-/// speech to text on this mac. one engine per process: every instance shares the same weights.
+/// speech to text on this device. one engine per process: every instance shares the same weights.
 ///
 /// safe to call from the main actor. every heavy call is async and leaves the caller's actor at once;
 /// streams are produced off the main actor and coalesced to at most one value per frame.
@@ -133,25 +133,28 @@ public final class Fourier: Sendable {
         let source = listenOptions.audioSource ?? options.audioSource
         do {
             if source.usesMicrophone { try await runtime.ensureMicrophone(options.permissions) }
+        } catch {
+            throw FourierError.wrap(error)
+        }
+        // the job is registered before the engine is readied, so nothing cools it in between
+        let job = await runtime.register(.listen, phase: .preparing)
+        do {
             try await runtime.ensureReady(options)
             let draftPlan = try await DecodePlan.make(listenOptions.decoding.draft, priority: .live)
             let finalPlan = try await DecodePlan.make(listenOptions.decoding.final, priority: .file)
             guard let tokenizer = await EngineHost.shared.tokenizer else { throw FourierError.engineFailure("the model is not loaded") }
-            let job = await runtime.register(.listen, phase: .capturing)
+            await runtime.update(job, phase: .capturing)
             let channel = EventChannel()
             let engine = LiveEngine(
                 id: job, options: listenOptions, inputDevice: listenOptions.inputDevice ?? options.inputDevice,
                 channel: channel, usesMicrophone: source.usesMicrophone, tokenizer: tokenizer,
                 draftPlan: draftPlan, finalPlan: finalPlan)
-            do {
-                try await engine.start(source: source)
-            } catch {
-                await runtime.end(job, error: FourierError.wrap(error))
-                throw error
-            }
+            try await engine.start(source: source)
             return LiveSession(id: job, engine: engine, channel: channel)
         } catch {
-            throw FourierError.wrap(error)
+            let wrapped = FourierError.wrap(error)
+            await runtime.end(job, error: wrapped)
+            throw wrapped
         }
     }
 

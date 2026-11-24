@@ -19,7 +19,9 @@ actor Runtime {
     // engine
     private var warm = false
     private var cooling = false
-    private var loadedDirectory: URL?
+    private var coolWaiters: [CheckedContinuation<Void, Never>] = []
+    /// what the loaded engine was prepared for
+    private var loadedKey: PrepareKey?
     private var run: PrepareRun?
     private var keepWarm: KeepWarm = .automatic
     private var lastUse = now()
@@ -97,21 +99,45 @@ actor Runtime {
 
     // MARK: prepare
 
-    /// nil when the engine is ready for these options.
+    /// returns when the engine is ready for these options.
+    ///
+    /// it joins a run for the same options; a run for other options, or one its last waiter
+    /// cancelled, is waited out and then this one starts. a cool in progress is waited out too.
     func ensureReady(_ options: FourierOptions) async throws {
         keepWarm = options.keepWarm
-        let directory = options.model.resolvedDirectory
-        if warm, loadedDirectory == directory.standardizedFileURL, run == nil {
-            touch()
-            return
+        let key = PrepareKey(options)
+        while true {
+            try Task.checkCancellation()
+            if cooling {
+                await withCheckedContinuation { coolWaiters.append($0) }
+                continue
+            }
+            if let run {
+                if run.key == key {
+                    do {
+                        try await run.join()
+                        return
+                    } catch is PrepareRun.Abandoned {}
+                }
+                try await run.waitOut()
+                continue
+            }
+            if warm, loadedKey == key {
+                touch()
+                return
+            }
+            do {
+                try await startRun(options, key: key).join()
+                return
+            } catch is PrepareRun.Abandoned {
+                continue
+            }
         }
-        let current = run ?? startRun(options)
-        try await current.join()
     }
 
-    private func startRun(_ options: FourierOptions) -> PrepareRun {
+    private func startRun(_ options: FourierOptions, key: PrepareKey) -> PrepareRun {
         let tracker = PrepareTracker()
-        let run = PrepareRun(tracker: tracker)
+        let run = PrepareRun(tracker: tracker, key: key)
         self.run = run
         state.error = nil
         state.prepare = tracker.current
@@ -122,7 +148,7 @@ actor Runtime {
         }
         run.task = Task.detached(priority: .utility) {
             do {
-                try await Runtime.shared.performPrepare(options, tracker: tracker)
+                try await Runtime.shared.performPrepare(options, key: key, tracker: tracker)
                 await Runtime.shared.prepareEnded(run, error: nil)
             } catch {
                 await Runtime.shared.prepareEnded(run, error: FourierError.wrap(error))
@@ -149,7 +175,8 @@ actor Runtime {
         prepareFeed.end(run, ready: error == nil)
         run.complete(error)
         publish()
-        if error == nil { touch() }
+        // a failed or cancelled run may still have loaded an engine; the idle check lets it go
+        touch()
     }
 
     nonisolated func checkPins(_ compute: ComputeOptions) throws {
@@ -163,10 +190,10 @@ actor Runtime {
         }
     }
 
-    /// the gpu unless a pin asks for the neural engine. the npu policy only takes stages where the
-    /// neural engine passes the golden test, and its 16-bit encoder does not: it gives the same
-    /// tokens on the golden clips but uses many times the safety margin. so the policy keeps the
-    /// gpu here, and only an explicit pin, which is outside the exactness claim, moves the encoder.
+    /// the gpu unless a pin asks for the neural engine. `compute.policy` is not read: every policy
+    /// resolves to the fastest exact placement. a policy may only take stages where the neural engine
+    /// passes the golden test, and its 16-bit encoder does not (same tokens on the golden clips, many
+    /// times the safety margin). only an explicit pin, which is outside the exactness claim, moves it.
     nonisolated static func encoderChip(for compute: ComputeOptions) -> Chip {
         compute.chips[.encoder] ?? .gpu
     }
@@ -188,7 +215,7 @@ actor Runtime {
             weightsBytes: pinned && model.sha256 == nil ? ModelLocation.weightsBytes : nil, offline: model.offline)
     }
 
-    private func performPrepare(_ options: FourierOptions, tracker: PrepareTracker) async throws {
+    private func performPrepare(_ options: FourierOptions, key: PrepareKey, tracker: PrepareTracker) async throws {
         try checkPins(options.compute)
         let request = try modelRequest(options)
         let directory = try await options.modelStore.prepare(request) { update in
@@ -202,12 +229,18 @@ actor Runtime {
         let started = now()
         let target = directory.standardizedFileURL
         let loaded = await host.isLoaded
-        if loadedDirectory != target || !loaded {
+        if loadedKey?.directory != target || !loaded {
             do {
                 try await host.load(modelDirectory: target)
+            } catch HostFailure.busy {
+                throw FourierError.engineFailure("another model is still running. wait for its work to end or cancel it before switching models")
             } catch {
                 throw FourierError.modelInvalid(String(describing: error))
             }
+            // the engine is loaded from here on, so a later failure or cancel still lets it cool
+            warm = true
+            cooling = false
+            loadedKey = nil
         }
         let wanted = Self.encoderChip(for: options.compute)
         let current: Chip = await host.encoderChip == .npu ? .npu : .gpu
@@ -215,7 +248,7 @@ actor Runtime {
             do {
                 try await host.setEncoderChip(wanted == .npu ? .npu : .gpu)
             } catch where options.compute.chips[.encoder] == nil {
-                // the npu policy is a preference: the gpu encoder stays
+                // unreachable today: without a pin the encoder stays on the gpu
             } catch {
                 throw FourierError.engineFailure("the neural engine encoder could not load: \(error)")
             }
@@ -224,7 +257,6 @@ actor Runtime {
         let loadTime = now() - started
         tracker.complete(.compile)
         tracker.estimate(.load, expected: 0.2)
-        loadedDirectory = target
         tracker.complete(.load)
         try Task.checkCancellation()
 
@@ -237,6 +269,7 @@ actor Runtime {
         PrepareTimings(compile: max(0.2, loadTime), warmUp: max(0.1, now() - warmStarted)).save()
         warm = true
         cooling = false
+        loadedKey = key
         applyPressure()
     }
 
@@ -287,22 +320,40 @@ actor Runtime {
     }
 
     func coolIfIdle(after idle: Double = 0) async {
-        guard warm, run == nil, state.jobs.isEmpty, now() - lastUse >= idle - 0.5 else { return }
-        await cool()
+        guard warm, run == nil, !cooling, state.jobs.isEmpty, now() - lastUse >= idle - 0.5 else { return }
+        if await cool() { return }
+        // a piece left over from an ended job is still on the engine: look again once it is done
+        guard warm, run == nil, state.jobs.isEmpty else { return }
+        idleCheck?.cancel()
+        idleCheck = Task {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            await self.coolIfIdle(after: idle)
+        }
     }
 
     /// lets go of the weights and caches. it waits for nothing: running work keeps the engine warm.
-    func cool() async {
-        guard warm, run == nil, state.jobs.isEmpty, await host.isIdle else { return }
+    /// - returns: whether the engine is cold now
+    @discardableResult
+    func cool() async -> Bool {
+        guard warm else { return true }
+        guard run == nil, !cooling, state.jobs.isEmpty else { return false }
         cooling = true
         publish()
-        await host.unload()
-        warm = false
+        // the host refuses if a piece is waiting, being read in or running
+        let unloaded = await host.unload()
         cooling = false
-        loadedDirectory = nil
-        prepareFeed.cooled()
-        idleCheck?.cancel()
+        if unloaded {
+            warm = false
+            loadedKey = nil
+            prepareFeed.cooled()
+            idleCheck?.cancel()
+        }
+        let waiters = coolWaiters
+        coolWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
         publish()
+        return unloaded
     }
 
     // MARK: jobs
@@ -318,7 +369,10 @@ actor Runtime {
     func update(_ id: UUID, phase: JobState.Phase? = nil, progress: Double?? = nil, audio: Duration? = nil) {
         guard let index = state.jobs.firstIndex(where: { $0.id == id }) else { return }
         if let phase { state.jobs[index].phase = phase }
-        if let progress { state.jobs[index].progress = progress }
+        if let progress {
+            // pieces report from many tasks, so a late, smaller fraction is ignored
+            if let new = progress, let old = state.jobs[index].progress, new < old {} else { state.jobs[index].progress = progress }
+        }
         if let audio { state.jobs[index].audioDuration = audio }
         publish()
     }
@@ -521,7 +575,8 @@ actor Runtime {
         metrics.maxBatchWidth = snapshot.maxRows
         metrics.queuedPieces = snapshot.queuedPieces
         metrics.activePieces = snapshot.activePieces
-        metrics.chipBusy = [.gpu: snapshot.gpuBusy, .cpu: snapshot.cpuBusy, .npu: 0]
+        // the neural engine has no busy measure, so it is left out rather than shown as 0
+        metrics.chipBusy = [.gpu: snapshot.gpuBusy, .cpu: snapshot.cpuBusy]
         metrics.appMemory = appMemoryFootprint()
         metrics.weightMemory = snapshot.weightBytes
         metrics.cacheMemory = snapshot.cacheBytes
@@ -546,16 +601,42 @@ actor Runtime {
 
 // MARK: prepare run
 
+/// what a prepare makes ready: callers with the same key share a run and a loaded engine.
+struct PrepareKey: Equatable, Sendable {
+    var directory: URL
+    var repository: String
+    var revision: String
+    var sha256: String?
+    var encoder: Chip
+
+    init(_ options: FourierOptions) {
+        directory = options.model.resolvedDirectory.standardizedFileURL
+        repository = options.model.repository
+        revision = options.model.revision
+        sha256 = options.model.sha256?.lowercased()
+        encoder = Runtime.encoderChip(for: options.compute)
+    }
+}
+
 /// one shared prepare. any number of callers join it; the work stops only when the last one cancels.
 final class PrepareRun: @unchecked Sendable {
+    /// thrown by `join()` when the run was already given up by its last waiter
+    struct Abandoned: Error {}
+
     let tracker: PrepareTracker
+    let key: PrepareKey
     private let lock = NSLock()
     private var waiters: [UUID: CheckedContinuation<Void, any Error>] = [:]
+    /// callers waiting for the run to end, whatever its outcome, without keeping it alive
+    private var watchers: [UUID: CheckedContinuation<Void, any Error>] = [:]
     private var outcome: Result<Void, FourierError>?
+    /// the last waiter left, so the run is winding down and nobody may join it
+    private var abandoned = false
     private var _task: Task<Void, Never>?
 
-    init(tracker: PrepareTracker) {
+    init(tracker: PrepareTracker, key: PrepareKey) {
         self.tracker = tracker
+        self.key = key
     }
 
     var task: Task<Void, Never>? {
@@ -567,39 +648,65 @@ final class PrepareRun: @unchecked Sendable {
         let id = UUID()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-                let (ready, stop): (Result<Void, FourierError>?, Bool) = lock.withLock {
-                    if let outcome { return (outcome, false) }
-                    if Task.isCancelled { return (.failure(.cancelled), waiters.isEmpty) }
+                let (ready, stop): (Result<Void, any Error>?, Bool) = lock.withLock {
+                    if let outcome { return (outcome.mapError { $0 as any Error }, false) }
+                    if abandoned { return (.failure(Abandoned()), false) }
+                    if Task.isCancelled {
+                        if waiters.isEmpty { abandoned = true }
+                        return (.failure(FourierError.cancelled), waiters.isEmpty)
+                    }
                     waiters[id] = continuation
                     return (nil, false)
                 }
                 if stop { task?.cancel() }
-                if let ready { continuation.resume(with: ready.mapError { $0 as any Error }) }
+                if let ready { continuation.resume(with: ready) }
             }
         } onCancel: {
             leave(id)
         }
     }
 
+    /// waits for the run to end, however it ends. throws only if the caller is cancelled.
+    func waitOut() async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                let (ended, cancelled): (Bool, Bool) = lock.withLock {
+                    if outcome != nil { return (true, false) }
+                    if Task.isCancelled { return (false, true) }
+                    watchers[id] = continuation
+                    return (false, false)
+                }
+                if ended { continuation.resume() } else if cancelled { continuation.resume(throwing: FourierError.cancelled) }
+            }
+        } onCancel: {
+            let continuation = lock.withLock { watchers.removeValue(forKey: id) }
+            continuation?.resume(throwing: FourierError.cancelled)
+        }
+    }
+
     /// a waiter gave up. the run stops when nobody is left.
     private func leave(_ id: UUID) {
         let (continuation, empty, task): (CheckedContinuation<Void, any Error>?, Bool, Task<Void, Never>?) = lock.withLock {
-            let continuation = waiters.removeValue(forKey: id)
-            return (continuation, waiters.isEmpty && outcome == nil, _task)
+            guard let continuation = waiters.removeValue(forKey: id) else { return (nil, false, _task) }
+            let empty = waiters.isEmpty && outcome == nil
+            if empty { abandoned = true }
+            return (continuation, empty, _task)
         }
         continuation?.resume(throwing: FourierError.cancelled)
         if empty { task?.cancel() }
     }
 
     func complete(_ error: FourierError?) {
-        let waiting: [CheckedContinuation<Void, any Error>] = lock.withLock {
+        let (waiting, watching): ([CheckedContinuation<Void, any Error>], [CheckedContinuation<Void, any Error>]) = lock.withLock {
             outcome = error.map { .failure($0) } ?? .success(())
-            defer { waiters.removeAll() }
-            return Array(waiters.values)
+            defer { waiters.removeAll(); watchers.removeAll() }
+            return (Array(waiters.values), Array(watchers.values))
         }
         for waiter in waiting {
             if let error { waiter.resume(throwing: error) } else { waiter.resume() }
         }
+        for watcher in watching { watcher.resume() }
     }
 }
 
@@ -661,7 +768,7 @@ final class PrepareFeed: Sendable {
     }
 }
 
-/// measured compile and warm-up times from this mac, so the estimated parts of the bar fit it.
+/// measured compile and warm-up times from this device, so the estimated parts of the bar fit it.
 struct PrepareTimings: Codable {
     var compile: Double = 2
     var warmUp: Double = 1

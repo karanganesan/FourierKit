@@ -413,6 +413,8 @@ final class MicrophoneCapture: @unchecked Sendable {
     private var sessionObservers: ObserverRegistration?
     /// another app or a call holds the audio session; nothing rebuilds until it ends
     private var interrupted = false
+    /// the app is in front, from its active and resign-active notices. capture starts in front.
+    private var appActive = true
     /// whether this capture activated the session, so a failure never deactivates the app's own
     private var sessionActivated = false
     #endif
@@ -787,9 +789,16 @@ extension MicrophoneCapture {
         }
         let active = center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) {
             [weak self] _ in
-            self?.control.async { [weak self] in self?.resumeIfHeld() }
+            self?.control.async { [weak self] in
+                self?.appActive = true
+                self?.resumeIfHeld()
+            }
         }
-        sessionObservers = ObserverRegistration(route, interruption, reset, active)
+        let resign = center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: nil) {
+            [weak self] _ in
+            self?.control.async { [weak self] in self?.appActive = false }
+        }
+        sessionObservers = ObserverRegistration(route, interruption, reset, active, resign)
     }
 
     private func unwatchDevices() {
@@ -818,7 +827,8 @@ extension MicrophoneCapture {
             tearDown()
         } else {
             interrupted = false
-            if shouldResume { resumeIfHeld() }
+            // without `shouldResume` an app still in front gets no become-active notice, so it resumes here
+            if shouldResume || appActive { resumeIfHeld() }
         }
     }
 

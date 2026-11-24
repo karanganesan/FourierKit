@@ -13,6 +13,8 @@ struct PieceRequest: Sendable {
     var language: String? = "English"
     var context: String? = nil
     var settings: GenerationSettings
+    /// the model folder the caller's settings came from. a piece for another model is refused.
+    var model: URL? = nil
     /// tokens already settled, read with the prompt so only what follows is generated
     var prefix: [Int32] = []
     var priority: Priority = .file
@@ -90,6 +92,10 @@ enum HostFailure: Error, Sendable {
     case notLoaded
     case cancelled
     case engine(String)
+    /// another model was asked for while pieces were waiting, being read in or running
+    case busy
+    /// the model this piece's settings came from is no longer the loaded one
+    case modelChanged
 }
 
 /// the one owner of the engine in this process.
@@ -134,6 +140,8 @@ actor EngineHost {
         var request: PieceRequest
         var arrived: Double
         var continuation: CheckedContinuation<PieceResult, Error>
+        /// cache slots and prompt, worked out once from the audio length before any work is done
+        var fit: (slots: Int, prompt: [Int32], audioTokens: Int)? = nil
     }
 
     private enum Search {
@@ -142,6 +150,8 @@ actor EngineHost {
     }
 
     private final class Active {
+        /// the engine whose cache holds this piece's slots
+        let owner: MetalEngine
         var id: Int
         var request: PieceRequest
         var piece: DecoderPiece
@@ -155,9 +165,9 @@ actor EngineHost {
         var widest = 0
         var continuation: CheckedContinuation<PieceResult, Error>
 
-        init(id: Int, request: PieceRequest, piece: DecoderPiece, search: Search, prompt: [Int32], audioTokens: Int,
+        init(owner: MetalEngine, id: Int, request: PieceRequest, piece: DecoderPiece, search: Search, prompt: [Int32], audioTokens: Int,
              timings: PieceTimings, arrived: Double, decodeStarted: Double, continuation: CheckedContinuation<PieceResult, Error>) {
-            self.id = id; self.request = request; self.piece = piece; self.search = search; self.prompt = prompt
+            self.owner = owner; self.id = id; self.request = request; self.piece = piece; self.search = search; self.prompt = prompt
             self.audioTokens = audioTokens; self.timings = timings; self.arrived = arrived
             self.decodeStarted = decodeStarted; self.continuation = continuation
         }
@@ -166,6 +176,8 @@ actor EngineHost {
     private var pending: [Pending] = []
     private var active: [Active] = []
     private var cancelled: Set<Int> = []
+    /// pieces being read in (mel, encode, prefill): in neither `pending` nor `active`, but busy
+    private var starting = 0
     private var nextID = 0
     private var pumping = false
 
@@ -180,6 +192,8 @@ actor EngineHost {
     /// maps the weights, compiles the kernels and loads the tokenizer. does nothing if already loaded.
     func load(modelDirectory: URL) throws {
         if engine != nil, self.modelDirectory == modelDirectory { return }
+        // running pieces live in the old engine's cache, so the engine only changes when idle
+        if engine != nil, !isIdle { throw HostFailure.busy }
         // the generation defaults come first, since they size the decoder cache
         let settings = try GenerationSettings.load(generationConfigJSON: modelDirectory.appendingPathComponent("generation_config.json"))
         let engine = try MetalEngine(modelDirectory: modelDirectory, settings: settings)
@@ -191,17 +205,20 @@ actor EngineHost {
         maxRows = engine.limits.maxRows(underPressure: underPressure)
     }
 
-    /// lets go of the weights and caches. waits for nothing: callers cool only when idle.
-    func unload() {
-        guard pending.isEmpty, active.isEmpty else { return }
+    /// lets go of the weights and caches if nothing is waiting, being read in or running.
+    /// - returns: whether it let go
+    @discardableResult
+    func unload() -> Bool {
+        guard isIdle else { return false }
         engine = nil
         neural = nil
         encoderChip = .gpu
         tokenizer = nil
         modelDirectory = nil
+        return true
     }
 
-    var isIdle: Bool { pending.isEmpty && active.isEmpty }
+    var isIdle: Bool { pending.isEmpty && active.isEmpty && starting == 0 }
 
     func setMaxRows(_ rows: Int) { maxRows = max(1, rows) }
 
@@ -238,6 +255,7 @@ actor EngineHost {
     /// runs one piece and returns when it is done. safe to call from many tasks at once.
     func transcribe(_ request: PieceRequest) async throws -> PieceResult {
         guard engine != nil else { throw HostFailure.notLoaded }
+        if let model = request.model, model != modelDirectory { throw HostFailure.modelChanged }
         let id = nextID
         nextID += 1
         return try await withTaskCancellationHandler {
@@ -266,21 +284,55 @@ actor EngineHost {
 
     private func pump() async {
         while !pending.isEmpty || !active.isEmpty {
-            await admit()
+            // never loop without progress: with no engine, everything waiting or running fails
+            guard engine != nil, tokenizer != nil else {
+                failAll(HostFailure.notLoaded)
+                break
+            }
+            let taken = await admit()
             dropCancelled()
-            if !active.isEmpty { await step() }
+            if !active.isEmpty {
+                await step()
+            } else if taken == 0, let item = pending.first {
+                // nothing running and nothing admitted cannot happen today; fail one rather than spin
+                pending.removeFirst()
+                item.continuation.resume(throwing: HostFailure.engine("a piece could not be started"))
+            }
         }
         cancelled.removeAll()
         pumping = false
     }
 
+    private func failAll(_ error: any Error) {
+        for item in pending { item.continuation.resume(throwing: error) }
+        pending.removeAll()
+        for item in active {
+            item.owner.release(item.piece)
+            item.continuation.resume(throwing: error)
+        }
+        active.removeAll()
+    }
+
+    /// cache slots and prompt for a piece, from its audio length alone, as `LogMel` and the encoder count them
+    private func fit(_ request: PieceRequest, engine: MetalEngine, tokenizer: Tokenizer) -> (slots: Int, prompt: [Int32], audioTokens: Int) {
+        let frames = max(request.samples.count, LogMel.minimumSamples) / LogMel.hopLength
+        let audioTokens = engine.audioTokenCount(frames: frames)
+        let prompt = Prompt.transcription(audioTokens: audioTokens, language: request.language, context: request.context, tokenizer: tokenizer)
+            + request.prefix
+        let settings = request.settings
+        return (engine.slotsNeeded(promptLength: prompt.count, beams: settings.numBeams, maxNewTokens: settings.maxNewTokens), prompt, audioTokens)
+    }
+
     /// reads in waiting pieces while there is room. with pieces already running it takes one per
     /// step, so a long prefill never holds live text back for long.
-    private func admit() async {
+    /// - returns: how many pieces left the line, started or failed
+    @discardableResult
+    private func admit() async -> Int {
         guard let engine, let tokenizer else {
+            let count = pending.count
             for item in pending { item.continuation.resume(throwing: HostFailure.notLoaded) }
             pending.removeAll()
-            return
+            return count
         }
         var admitted = 0
         while !pending.isEmpty {
@@ -292,20 +344,40 @@ actor EngineHost {
             let wanted = pending[index].request.settings.numBeams
             if !active.isEmpty, rows + wanted > maxRows { break }
             if !active.isEmpty, admitted >= 1 { break }
+            if pending[index].fit == nil { pending[index].fit = fit(pending[index].request, engine: engine, tokenizer: tokenizer) }
+            // no room in the cache yet: it waits in line, with no work done, until a running piece ends
+            if !active.isEmpty, let fit = pending[index].fit, fit.slots > engine.largestFreeRun { break }
             let item = pending.remove(at: index)
+            starting += 1
+            let result: Result<Active?, any Error>
             do {
-                if let started = try await start(item, engine: engine, tokenizer: tokenizer) {
-                    active.append(started)
-                }
-            } catch EngineFailure.outOfSlots where !active.isEmpty {
-                // no room in the cache yet. it goes back in line until a running piece ends.
-                pending.append(item)
-                break
+                result = .success(try await start(item, engine: engine, tokenizer: tokenizer))
             } catch {
+                result = .failure(error)
+            }
+            starting -= 1
+            switch result {
+            case .success(let started?):
+                if self.engine === engine {
+                    active.append(started)
+                } else {
+                    // the engine changed while this piece was read in; it cannot run against another cache
+                    engine.release(started.piece)
+                    started.continuation.resume(throwing: HostFailure.notLoaded)
+                }
+            case .success(nil):
+                break
+            case .failure(EngineFailure.outOfSlots) where !active.isEmpty:
+                // the estimate said it fits but the cache said no: back in line until a running piece ends
+                pending.append(item)
+                return admitted
+            case .failure(let error):
                 item.continuation.resume(throwing: error)
             }
             admitted += 1
+            if self.engine !== engine { return admitted }
         }
+        return admitted
     }
 
     private func start(_ item: Pending, engine: MetalEngine, tokenizer: Tokenizer) async throws -> Active? {
@@ -328,8 +400,13 @@ actor EngineHost {
 
         request.onProgress?(PieceProgress.encoded)
         clock = Self.now()
-        let base = Prompt.transcription(audioTokens: audio.count, language: request.language, context: request.context, tokenizer: tokenizer)
-        let prompt = base + request.prefix
+        let prompt: [Int32]
+        if let fit = item.fit, fit.audioTokens == audio.count {
+            prompt = fit.prompt
+        } else {
+            prompt = Prompt.transcription(audioTokens: audio.count, language: request.language, context: request.context, tokenizer: tokenizer)
+                + request.prefix
+        }
         let settings = request.settings
         let (piece, firstRow) = try await engine.prefill(prompt: prompt, audio: audio, beams: settings.numBeams, maxNewTokens: settings.maxNewTokens)
         let logits = firstRow.values
@@ -365,7 +442,7 @@ actor EngineHost {
         timings.firstToken = Self.now() - item.arrived
 
         let started = Active(
-            id: item.id, request: request, piece: piece, search: search, prompt: prompt, audioTokens: audio.count,
+            owner: engine, id: item.id, request: request, piece: piece, search: search, prompt: prompt, audioTokens: audio.count,
             timings: timings, arrived: item.arrived, decodeStarted: Self.now(), continuation: item.continuation
         )
         started.candidates = candidates
@@ -384,17 +461,20 @@ actor EngineHost {
     }
 
     private func dropCancelled() {
-        guard !cancelled.isEmpty, let engine else { return }
+        guard !cancelled.isEmpty else { return }
         defer { cancelled.removeAll() }
         for item in active where cancelled.contains(item.id) {
-            engine.release(item.piece)
+            item.owner.release(item.piece)
             item.continuation.resume(throwing: CancellationError())
         }
         active.removeAll { cancelled.contains($0.id) }
     }
 
     private func step() async {
-        guard let engine, let tokenizer else { return }
+        guard let engine, let tokenizer, active.allSatisfy({ $0.owner === engine }) else {
+            failAll(HostFailure.notLoaded)
+            return
+        }
         let inputs: [(piece: DecoderPiece, tokens: [Int32])] = active.map { item in
             switch item.search {
             case .beam(let beam): (item.piece, beam.nextInputs)
@@ -406,9 +486,9 @@ actor EngineHost {
         do {
             logits = try await engine.step(inputs).values
         } catch {
-            // a failed gpu call fails every piece that shared it. the layer above reruns them.
+            // a failed gpu call fails every piece that shared it. the transcriber runs a file piece once more.
             for item in active {
-                engine.release(item.piece)
+                item.owner.release(item.piece)
                 item.continuation.resume(throwing: error)
             }
             active.removeAll()
@@ -460,7 +540,7 @@ actor EngineHost {
             score = 0
         }
         let steps = item.piece.steps + 1
-        engine.release(item.piece)
+        item.owner.release(item.piece)
         var timings = item.timings
         timings.decode = Self.now() - item.decodeStarted
         timings.total = Self.now() - item.arrived

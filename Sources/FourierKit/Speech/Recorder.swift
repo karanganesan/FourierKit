@@ -92,6 +92,25 @@ public final class Recorder: Sendable {
         }
     }
 
+    /// a recorder dropped without `stop()` or `cancel()` stops capturing and ends its job.
+    /// the tasks hold only what they need, never the recorder, so this runs when the last reference goes.
+    deinit {
+        guard finished.value == nil else { return }
+        reader.cancel()
+        drafter?.cancel()
+        draftFeed.finish()
+        levelFeed.finish(with: 0)
+        let input = input, usesMicrophone = usesMicrophone, job = id
+        Task.detached(priority: .userInitiated) {
+            await input.stop()
+            if usesMicrophone {
+                Runtime.shared.levels.send(0)
+                await Runtime.shared.setCapture(.off)
+            }
+            await Runtime.shared.end(job)
+        }
+    }
+
     /// stops capture and returns everything recorded. calling it again returns the same recording.
     @concurrent
     public func stop() async -> Recording {
@@ -138,8 +157,7 @@ public final class Recorder: Sendable {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
         func pass(_ samples: [Float], shown: Locked<Int>? = nil, settled: String = "") async -> String? {
-            var building = PieceRequest(
-                samples: samples, language: plan.language, context: plan.context, settings: plan.settings, priority: .live)
+            var building = plan.request(samples, priority: .live)
             if let shown {
                 // the tail grows token by token, and only ever grows inside one pass
                 building.onTokens = { tokens in
@@ -163,15 +181,37 @@ public final class Recorder: Sendable {
         var interval = 0.5
         var lastPass = now() - interval
         let shown = Locked(0)
+        // the live gate, run over the recording as it grows: a pass only runs if there was speech
+        // since the last one, so silence costs no gpu work
+        var detector = SpeechDetector()
+        var scanned = 0
+        var voiced = false
         while !Task.isCancelled {
             let count = store.update { $0.samples.count }
+            if count > scanned {
+                let fresh = store.update { store -> [Float] in
+                    let end = min(count, store.samples.count)
+                    return end > scanned ? Array(store.samples[scanned..<end]) : []
+                }
+                if !detector.feed(fresh).isEmpty || detector.isSpeaking { voiced = true }
+                scanned += fresh.count
+            }
             let due = now() - lastPass >= interval
-            // at least half a second to work with, and something new since the last pass
-            guard due, count - cut >= 8_000, count - covered >= 3_200 else {
+            // at least half a second to work with, something new since the last pass, and speech in it
+            guard due, voiced, count - cut >= 8_000, count - covered >= 3_200 else {
                 try? await Task.sleep(for: .milliseconds(40))
                 continue
             }
-            var tail = store.update { Array($0.samples[cut..<min(count, $0.samples.count)]) }
+            // cancel() may empty the store at any moment, so the read is clamped to what is there
+            var tail = store.update { store -> [Float] in
+                let end = min(count, store.samples.count)
+                return end > cut ? Array(store.samples[cut..<end]) : []
+            }
+            guard !tail.isEmpty else {
+                try? await Task.sleep(for: .milliseconds(40))
+                continue
+            }
+            voiced = detector.isSpeaking
             if tail.count > 20 * 16_000 {
                 let first = AudioSplitter.pieces(samples: tail, maxSeconds: 16)[0]
                 if first.count < tail.count, let done = await pass(Array(tail[first])) {

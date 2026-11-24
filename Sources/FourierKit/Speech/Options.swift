@@ -59,18 +59,27 @@ public struct FourierOptions: Sendable {
 
 // MARK: compute
 
+/// where each stage runs.
+///
+/// today every policy resolves to the same placement: the fastest one that keeps the exact text,
+/// which is the cpu for mel and search and the gpu for the encoder and decoder. only an explicit
+/// pin in `chips` moves a stage, and a pinned placement is outside the exactness claim.
+/// `resolvedPlacement` shows what a set of options runs on; `FourierState.placement` shows what is loaded.
 public struct ComputeOptions: Sendable, Hashable {
     public enum PlacementPolicy: String, Sendable, Hashable {
-        /// the fastest measured chip for each stage
+        /// the fastest placement that keeps the exact text: the gpu for the encoder and decoder
         case automatic
-        /// prefer the neural engine where a path exists
+        /// accepted for forward compatibility; it currently chooses the same placement as `.automatic`.
+        /// the neural engine encoder does not pass the exactness margin, so no policy moves work to it.
         case npu
-        /// prefer the lowest power path
+        /// accepted for forward compatibility; it currently chooses the same placement as `.automatic`
         case efficiency
     }
 
+    /// accepted and kept, but it does not change the placement today. see `PlacementPolicy`.
     public var policy: PlacementPolicy = .automatic
-    /// hard pins. a pin no shipped path can satisfy fails prepare with `FourierError.unsupportedPin`.
+    /// hard pins, the only way to move a stage. a pin no shipped path can satisfy fails prepare with
+    /// `FourierError.unsupportedPin`. a pinned placement is outside the exactness claim.
     public var chips: [Stage: Chip] = [:]
     /// hard pins. a pin no shipped path can satisfy fails prepare with `FourierError.unsupportedPrecision`.
     public var precision: [Stage: Precision] = [:]
@@ -79,6 +88,12 @@ public struct ComputeOptions: Sendable, Hashable {
         self.policy = policy
         self.chips = chips
         self.precision = precision
+    }
+
+    /// the chip each stage runs on with these options: the shipped placement with the pins applied.
+    /// the policy does not change it.
+    public var resolvedPlacement: [Stage: Chip] {
+        Runtime.shippedPlacement.merging(chips) { _, pin in pin }
     }
 }
 
@@ -93,7 +108,9 @@ public struct DecodingOptions: Sendable, Hashable {
     }
 
     public var search: Search = .automatic
-    /// nil uses the checkpoint's limit (512)
+    /// nil uses the checkpoint's limit (512): a piece that reaches it is split at a quiet point and
+    /// decoded again, so long speech is never cut short. a value you set is a cap: a piece stops
+    /// there, is not split, and reports `reachedStop == false`.
     public var maxTokens: Int?
     /// no-repeat n-gram size. nil uses the checkpoint's (8), 0 turns it off.
     public var repeatGuard: Int?
@@ -149,7 +166,7 @@ public enum NoiseProcessing: Sendable {
 // MARK: lifecycle
 
 public enum KeepWarm: String, Sendable, Hashable {
-    /// stays loaded after prepare(); cools after 5 idle minutes, under memory pressure or when the mac is hot
+    /// stays loaded after prepare(); cools after 5 idle minutes, under memory pressure or when the device is hot
     case automatic
     /// stays loaded until cool() or critical memory pressure
     case always
@@ -175,7 +192,7 @@ public struct ModelOptions: Sendable, Hashable {
     public var revision: String = ModelLocation.revision
     /// the weights' sha256. nil uses the pinned one, which only fits the pinned revision.
     public var sha256: String?
-    /// never touches the network. prepare fails if the model is not on this mac.
+    /// never touches the network. prepare fails if the model is not on this device.
     public var offline = false
 
     /// `revision` nil is the pinned checkpoint

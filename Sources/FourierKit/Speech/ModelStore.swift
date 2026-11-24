@@ -86,18 +86,22 @@ public struct HuggingFaceModelStore: ModelStore {
         var verified = Self.isVerified(weights, sha256: request.weightsSHA256)
         progress(ModelStoreProgress(stage: .check, fraction: 1, bytesTotal: total))
 
-        // a whole weights file that was never verified gets hashed before anything is downloaded
+        // a weights file that was never verified is hashed before anything is downloaded. it is only
+        // removed once its hash is known not to match, or its known size rules a match out, and
+        // never offline, where it may be all there is.
         if !verified, fm.fileExists(atPath: weights.path) {
             let size = Self.size(of: weights)
-            if total > 0, size == total {
-                progress(ModelStoreProgress(stage: .download, fraction: 1, bytesDone: size, bytesTotal: total))
+            if total == 0 || size == total {
+                progress(ModelStoreProgress(stage: .download, fraction: 1, bytesDone: size, bytesTotal: max(total, size)))
                 if try await Self.verify(weights, request: request, progress: progress) {
                     Self.writeMarker(for: weights, sha256: request.weightsSHA256)
                     verified = true
-                } else {
+                } else if !request.offline {
                     try? fm.removeItem(at: weights)
                 }
-            } else if total > 0, size < total, !fm.fileExists(atPath: part.path) {
+            } else if request.offline {
+                // the wrong size for the pinned file, and nothing may be changed offline
+            } else if size < total, !fm.fileExists(atPath: part.path) {
                 // a partial file under the final name continues as the part file
                 try? fm.moveItem(at: weights, to: part)
             } else {
