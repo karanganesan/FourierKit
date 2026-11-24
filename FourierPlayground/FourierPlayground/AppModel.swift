@@ -4,7 +4,8 @@ import Foundation
 import Observation
 
 enum Mode: String, Codable, CaseIterable, Identifiable, Sendable {
-    case transcribe, record, listen
+    // the order everything lists them in: the sidebar, the tabs, the menu shortcuts
+    case listen, record, transcribe
     var id: Self { self }
 
     var title: String { rawValue }
