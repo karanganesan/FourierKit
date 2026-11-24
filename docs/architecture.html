@@ -270,10 +270,10 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
       <li><strong>one wide decoder batch.</strong> beams and pieces share each weight read.</li>
       <li><strong>refill slots at once.</strong> when a piece ends, the next one takes its slot without draining the batch.</li>
       <li><strong>encoder works ahead.</strong> the other chip prepares the next piece, so the batch never waits for audio.</li>
-      <li><strong>never move beam data.</strong> cache rows stay put, and a small index table tracks which beam owns each row.</li>
+      <li><strong>never copy beam history.</strong> each step writes to its own cache slot, and a per-beam ancestry table says which slots make up each beam.</li><li><strong>batching must be invisible.</strong> a row's scores are bit-identical at any batch width, slot, neighbor or padding, with metal fast-math off.</li>
       <li><strong>pack the calls.</strong> many pieces go into one gpu command buffer or one npu batch, and the next call is prepared while this one runs.</li>
       <li><strong>slow down, never overflow.</strong> bounded queues hold back the stage before a slow one.</li>
-      <li><strong>recover on its own.</strong> if a chip call fails or falls back, that piece reruns on the exact gpu path.</li>
+      <li><strong>recover on its own.</strong> if a chip call fails, that piece reruns on the exact gpu path.</li>
     </ol>
   </section>
 
@@ -292,8 +292,8 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
         <tbody>
           <tr><td><strong>short</strong></td><td>under 5 s</td><td>time to first text</td><td>warm model, starts at once, no batch wait</td></tr>
           <tr><td><strong>medium</strong></td><td>5 to 30 s</td><td>speed</td><td>one pass, batched blocks and beams</td></tr>
-          <tr><td><strong>long</strong></td><td>30 s to one full pass</td><td>speed</td><td>encoder streams blocks, then one large prefill</td></tr>
-          <tr><td><strong>very long</strong></td><td>past one pass</td><td>throughput</td><td>shorter split pieces, wide batch, slots refilled</td></tr>
+          <tr><td><strong>long</strong></td><td>30 to 120 s</td><td>speed</td><td>encoder streams blocks, then one large prefill</td></tr>
+          <tr><td><strong>very long</strong></td><td>past 120 s</td><td>throughput</td><td>shorter split pieces, wide batch, slots refilled</td></tr>
           <tr><td><strong>many files</strong></td><td>any mix</td><td>throughput</td><td>similar lengths grouped, widest batch that fits</td></tr>
           <tr><td><strong>realtime</strong></td><td>live</td><td>lowest latency</td><td>newest audio, tail only, update rate follows measured speed</td></tr>
           <tr><td><strong>realtime plus files</strong></td><td>mixed</td><td>lowest latency</td><td>live goes first, files fill the spare slots</td></tr>
@@ -311,7 +311,7 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
 <section aria-labelledby="realtime">
     <h2 id="realtime">the realtime path</h2>
     <p class="dim">everything before the model, on by default for live audio. the microphone is open only while listening, and files skip this path.</p>
-    <div class="table-wrap" tabindex="0" role="region" aria-label="realtime path"><table><thead><tr><th scope="col">step</th><th scope="col">where</th><th scope="col">what it does</th></tr></thead><tbody><tr><td><strong>permission</strong></td><td>first listen</td><td>asks once, only when the microphone is needed</td></tr><tr><td><strong>voice processing</strong></td><td>audio system</td><td>noise suppression, echo cancellation and gain</td></tr><tr><td><strong>ring buffer</strong></td><td>audio thread</td><td>copies samples with no locks or waiting</td></tr><tr><td><strong>pre-roll</strong></td><td>ring buffer</td><td>keeps 500 ms so first words are not clipped</td></tr><tr><td><strong>speech detection</strong></td><td>cpu</td><td>fast energy gate, confirmed by a speech classifier</td></tr><tr><td><strong>warm engine</strong></td><td>npu and gpu</td><td>already loaded, so the first call starts at once</td></tr><tr><td><strong>state</strong></td><td>background</td><td>one update per frame, delivered off the main actor</td></tr></tbody></table></div>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="realtime path"><table><thead><tr><th scope="col">step</th><th scope="col">where</th><th scope="col">what it does</th></tr></thead><tbody><tr><td><strong>permission</strong></td><td>first listen</td><td>asks once, only when needed, and reports microphone state</td></tr><tr><td><strong>voice processing</strong></td><td>audio system</td><td>noise suppression, echo cancellation and gain, with minimum ducking of other apps</td></tr><tr><td><strong>ring buffer</strong></td><td>audio thread</td><td>copies samples with no locks or waiting</td></tr><tr><td><strong>pre-roll</strong></td><td>ring buffer</td><td>keeps 500 ms so first words are not clipped</td></tr><tr><td><strong>speech detection</strong></td><td>cpu</td><td>fast energy gate starts drafts, and a speech classifier can veto false starts</td></tr><tr><td><strong>warm engine</strong></td><td>npu and gpu</td><td>already loaded, so the first call starts at once</td></tr><tr><td><strong>state</strong></td><td>background</td><td>one update per frame, produced off the main actor</td></tr></tbody></table></div>
   </section>
 
   <section aria-labelledby="ways">
@@ -330,7 +330,7 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
       <div class="bar-row"><span>32-bit weights, one by one</span><div class="bar" style="width:17%"></div><span>~1.3x realtime</span></div>
     </div>
     <p>a wide batch does not make one clip faster than this. it lets several clips share the same weight reads, so total throughput rises until compute or cache traffic becomes the limit.</p>
-    <p>the cache adds about 115 kb per context token, or about 0.23 gb per step for a 2-minute piece. this is why long audio prefers shorter pieces.</p>
+    <p>the exact path keeps a 32-bit cache, about 229 kb per context token, or about 0.46 gb per step for a 2-minute piece. this is why long audio prefers shorter pieces. the clip also spends an estimated 2-5 s in prefill plus the encoder, so the 4-6x estimate is closer to a best case.</p>
     <h3 style="margin-top:32px">what to expect</h3>
     <div class="table-wrap" tabindex="0" role="region" aria-label="estimated speed on this mac"><table><thead><tr><th scope="col">path</th><th scope="col">matches reference</th><th scope="col">estimated speed</th></tr></thead><tbody><tr><td><strong>16-bit weights, 32-bit math, 3 beams</strong></td><td>expected, golden test decides</td><td>~4-6x realtime</td></tr><tr><td><strong>16-bit weights and math, 3 beams</strong></td><td>only if margin and golden test pass</td><td>~4-6x realtime</td></tr><tr><td><strong>32-bit weights and math, 3 beams</strong></td><td>yes, the fallback</td><td>~3x realtime</td></tr><tr><td><strong>batch of files, exact path</strong></td><td>golden test decides</td><td>~12-20x total</td></tr><tr><td><strong>8-bit, greedy</strong></td><td>no, a lower-precision baseline</td><td>~10-15x realtime</td></tr></tbody></table></div><p class="dim small">estimates for a warm run on this fanless m4 macbook air, at about 3.4 tokens per second of speech. the 8-bit row scales <a href="https://github.com/ljho01/qwen3-asr-opt" target="_blank" rel="noopener noreferrer">a published 33x run on an m4 pro</a> by memory bandwidth. the batch row is the least certain, because it depends on gpu compute and cache traffic. long runs may be slower once the air gets hot.</p>
   </section>
@@ -363,8 +363,9 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
     <h2 id="order">build order</h2>
     <ol class="rules">
       <li><strong>run the one-layer benchmark.</strong> it measures the real ceiling across chips, batch width, context length and prefill.</li>
-      <li><strong>build the exact path:</strong> batched beams with 16-bit weights and 32-bit math.</li>
-      <li><strong>index the beam cache,</strong> so its rows never move.</li>
+      <li><strong>build the full 32-bit path</strong> with batched beams, so logic bugs are separate from precision bugs.</li>
+      <li><strong>add the beam ancestry cache,</strong> so beam history is never copied.</li>
+      <li><strong>switch to 16-bit weights</strong> with 32-bit math and cache.</li>
       <li><strong>widen the batch</strong> and refill its slots.</li>
       <li><strong>race the encoder</strong> on the npu and gpu, then move it ahead.</li>
       <li><strong>test pure 16-bit math.</strong> it stays only if it passes the golden test and the safety margin.</li>
@@ -393,10 +394,10 @@ const groups = [
   ]},
   { name: 'decode', when: 'repeats for every token, up to 512', steps: [
     ['token lookup', 'inside the decoder graph, for the newest token of each beam.', 'test', 'first', 'test'],
-    ['decoder', '28 layers on one chip, with 16-bit weights and 32-bit math. all beams and pieces run as one wide batch, so each step reads the weights once.', 'test', 'first', 'test'],
+    ['decoder', '28 layers on one chip, with raw 16-bit weights and 32-bit math and cache. all beams and pieces run as one wide batch, so each step reads the weights once.', 'test', 'first', 'test'],
     ['output head', 'on the same chip as the decoder, sharing weights with the token table.', 'test', 'first', 'test'],
-    ['token bans and top-k', 'fixed bans are masked on the chip, and only the best scores come back, with extras to survive the repeat ban.', 'test', 'first', 'test'],
-    ['beam search', 'repeat bans and scoring run across beams, then a small index table is updated so cache rows never move.', '-', '-', 'parallel'],
+    ['token bans and top-k', 'full-vocabulary log-softmax, then fixed bans, then the top 9 per beam, with a full-row fallback if the repeat ban empties it.', 'test', 'first', 'test'],
+    ['beam search', 'repeat bans over the whole sequence and accumulated scoring run across beams, then the ancestry table is updated so beam history is never copied.', '-', '-', 'parallel'],
   ]},
   { name: 'finish', when: 'once per clip', steps: [
     ['tokenizer and text', 'turns tokens into text and joins the pieces of long files.', '-', '-', 'run'],
@@ -544,7 +545,7 @@ document.getElementById('way-grid').innerHTML = [
   way('across pieces', 'pieces decode in one call, and a finished piece hands its slot to the next.', [...fill([0,1,2], [0], 'g'), ...fill([0,1,2,3,4], [1], 'g'), ...fill([0,1,2,3], [2], 'g')]),
   way('across chips', 'one chip prepares the next piece while another decodes. this helps across pieces, not inside one clip.', [...fill([0,1,2,3,4], [0], 'n'), ...fill([2,3,4,5,6,7], [2], 'g')]),
   way('across cores', 'the cpu takes parallel work: file decode, mel when it wins, beam bookkeeping.', fill([0,1,2], [0,1,2], 'c')),
-  way('across memory', 'chips share weights and audio tokens without copies, and beam cache rows stay in place.', [...fill([0,1,2,3,4,5,6,7], [0], 'n'), ...fill([0,1,2,3,4,5,6,7], [1], 'c'), ...fill([0,1,2,3,4,5,6,7], [2], 'g')]),
+  way('across memory', 'chips share weights and audio tokens without copies, and beam history is never copied.', [...fill([0,1,2,3,4,5,6,7], [0], 'n'), ...fill([0,1,2,3,4,5,6,7], [1], 'c'), ...fill([0,1,2,3,4,5,6,7], [2], 'g')]),
 ].join('');
 </script>
 </body>
