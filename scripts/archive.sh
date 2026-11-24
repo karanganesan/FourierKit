@@ -42,8 +42,8 @@ case "$platform" in
 esac
 
 if [[ "$upload" == "upload" ]]; then
-  options="$out/export-$platform.plist"
-  cat > "$options" <<PLIST
+  plist="$out/export-$platform.plist"
+  cat > "$plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -55,6 +55,6 @@ if [[ "$upload" == "upload" ]]; then
 </dict>
 </plist>
 PLIST
-  xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$options" \
+  xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$plist" \
     -exportPath "$out/export-$platform" -allowProvisioningUpdates
 fi
