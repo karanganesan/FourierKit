@@ -2,6 +2,7 @@
 # archives FourierPlayground for the app store and testflight, and uploads it when asked.
 #   scripts/archive.sh ios            archive only
 #   scripts/archive.sh macos upload   archive, then upload to app store connect
+#   BUILD_NUMBER=2 scripts/archive.sh macos upload   the same, as build 2 of this version
 # needs FourierPlayground/Local.xcconfig with your team id, and that team's account signed in to xcode.
 set -euo pipefail
 cd "${0:A:h}/.."
@@ -15,6 +16,10 @@ if [[ -z "$team" ]]; then
   exit 1
 fi
 
+# BUILD_NUMBER=2 scripts/archive.sh … uploads a second build of the same version
+build=()
+if [[ -n "${BUILD_NUMBER:-}" ]]; then build=(CURRENT_PROJECT_VERSION="$BUILD_NUMBER"); fi
+
 out=".build/archives"
 mkdir -p "$out"
 archive="$out/FourierPlayground-$platform.xcarchive"
@@ -23,16 +28,18 @@ case "$platform" in
   ios)
     xcodebuild -project "$project" -scheme FourierPlayground -configuration Release \
       -derivedDataPath .build/archive-ios -destination 'generic/platform=iOS' \
-      -archivePath "$archive" -allowProvisioningUpdates archive
+      -archivePath "$archive" -allowProvisioningUpdates $build archive
     ;;
   macos)
     # the mac app store requires the sandbox. apple silicon only: the kit uses 16-bit floats.
+    # the identity is set through the app target's own setting, so the package's resource bundle
+    # is not signed on its own with a certificate the store rejects.
     xcodebuild -project "$project" -scheme FourierPlayground -configuration Release \
       -derivedDataPath .build/archive-macos -destination 'generic/platform=macOS' \
       -archivePath "$archive" -allowProvisioningUpdates \
       ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
-      CODE_SIGN_IDENTITY="Apple Development" DEVELOPMENT_TEAM="$team" \
-      FOURIER_MAC_ENTITLEMENTS=FourierPlayground-Store.entitlements FOURIER_MAC_SANDBOX=YES \
+      FOURIER_MAC_IDENTITY="Apple Development" \
+      FOURIER_MAC_ENTITLEMENTS=FourierPlayground-Store.entitlements FOURIER_MAC_SANDBOX=YES $build \
       archive
     ;;
   *)

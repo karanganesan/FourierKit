@@ -6,4 +6,6 @@ FOURIER_BUNDLE_ID = com.karanganesan.fourierkit
 // for the app store, which requires it.
 FOURIER_MAC_ENTITLEMENTS = FourierPlayground.entitlements
 FOURIER_MAC_SANDBOX = NO
+// ad hoc for a development build. the archive script signs with the team instead.
+FOURIER_MAC_IDENTITY = -
 #include? "Local.xcconfig"

@@ -206,7 +206,7 @@
 				CODE_SIGN_ENTITLEMENTS = "";
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "FourierPlayground-iOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "$(FOURIER_MAC_ENTITLEMENTS)";
-				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_IDENTITY = "$(FOURIER_MAC_IDENTITY)";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -270,7 +270,7 @@
 				CODE_SIGN_ENTITLEMENTS = "";
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "FourierPlayground-iOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "$(FOURIER_MAC_ENTITLEMENTS)";
-				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_IDENTITY = "$(FOURIER_MAC_IDENTITY)";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
