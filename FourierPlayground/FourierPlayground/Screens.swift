@@ -31,7 +31,7 @@ struct TranscriptText: View {
             .frame(maxWidth: 880, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .scrollEdgeEffectStyle(.soft, for: .top)
+        .fourierScrollEdges()
         .copyable([text])
     }
 

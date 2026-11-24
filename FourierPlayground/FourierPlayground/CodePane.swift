@@ -239,7 +239,7 @@ struct CodePane: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .scrollEdgeEffectStyle(.soft, for: .top)
+        .fourierScrollEdges()
     }
 }
 

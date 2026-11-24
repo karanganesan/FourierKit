@@ -206,7 +206,7 @@ private struct Sidebar: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .scrollEdgeEffectStyle(.soft, for: .top)
+        .fourierScrollEdges()
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
