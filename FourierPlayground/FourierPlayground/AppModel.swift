@@ -163,6 +163,10 @@ final class AppModel {
     }
 
     /// the exact text the current screen shows, for copy, share and export
+    /// whether there is text to copy, share or export. stored, and only written when it flips, so
+    /// the toolbar does not rebuild on every live update while text is streaming in.
+    var hasText = false
+
     var currentText: String? {
         switch selection {
         case .mode(.transcribe): transcribe.transcript?.text

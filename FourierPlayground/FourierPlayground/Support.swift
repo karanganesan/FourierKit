@@ -90,3 +90,14 @@ final class MenuLowercaser {
         }
     }
 }
+
+/// the system share menu for a piece of text, opened when asked for. a `ShareLink` in the toolbar
+/// needs the text while drawing, which would rebuild the toolbar every time the text changes.
+enum SharePicker {
+    @MainActor
+    static func show(_ text: String) {
+        guard let view = NSApp.keyWindow?.contentView else { return }
+        let anchor = CGRect(x: view.bounds.maxX - 160, y: view.bounds.maxY - 48, width: 1, height: 1)
+        NSSharingServicePicker(items: [text]).show(relativeTo: anchor, of: view, preferredEdge: .minY)
+    }
+}

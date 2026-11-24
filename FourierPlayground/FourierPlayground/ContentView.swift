@@ -34,13 +34,14 @@ struct ContentView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
+        .background { TextPresence() }
         .animation(.smooth(duration: 0.24), value: app.showSidebar)
         .animation(.smooth(duration: 0.24), value: app.showStats)
         .animation(.smooth(duration: 0.24), value: app.showCode)
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button("sidebar", systemImage: "sidebar.leading") { app.showSidebar.toggle() }
-                    .help(app.showSidebar ? "hide the sidebar" : "show the sidebar")
+                    .help("show or hide the sidebar")
             }
             PlaygroundToolbar()
         }
@@ -244,41 +245,58 @@ private struct Detail: View {
 
 // MARK: toolbar
 
+/// watches for text appearing or going away, in a view of its own, so that is the only thing
+/// re-evaluated while live text changes many times a second.
+private struct TextPresence: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        Color.clear
+            .onChange(of: app.currentText != nil, initial: true) { _, present in
+                if app.hasText != present { app.hasText = present }
+            }
+    }
+}
+
 private struct PlaygroundToolbar: ToolbarContent {
     @Environment(AppModel.self) private var app
     @State private var exporting = false
+    @State private var exportText = ""
 
     var body: some ToolbarContent {
-        @Bindable var app = app
-        let text = app.currentText
+        // the toolbar reads only values that change when the user does something. the text itself
+        // is fetched when a button is pressed, never while drawing.
+        let hasText = app.hasText
         ToolbarItemGroup(placement: .primaryAction) {
             if app.canToggleCurrent {
                 Button(app.toggleTitle, systemImage: toggleSymbol) { app.toggleCurrent() }
                     .help(app.toggleTitle)
-                    .contentTransition(.symbolEffect(.replace))
             }
             Button("copy", systemImage: "doc.on.doc") {
-                if let text { Pasteboard.copy(text) }
+                if let text = app.currentText { Pasteboard.copy(text) }
             }
             .help("copy transcript")
-            .disabled(text == nil)
-            ShareLink(item: text ?? "") {
-                Label("share", systemImage: "square.and.arrow.up")
+            .disabled(!hasText)
+            Button("share", systemImage: "square.and.arrow.up") {
+                if let text = app.currentText { SharePicker.show(text) }
             }
             .help("share transcript")
-            .disabled(text == nil)
-            Button("export", systemImage: "arrow.down.document") { exporting = true }
-                .help("export as text")
-                .disabled(text == nil)
-                .fileExporter(isPresented: $exporting, document: TextFile(text: text ?? ""), contentType: .plainText,
-                              defaultFilename: "transcript") { _ in }
+            .disabled(!hasText)
+            Button("export", systemImage: "arrow.down.document") {
+                exportText = app.currentText ?? ""
+                exporting = true
+            }
+            .help("export as text")
+            .disabled(!hasText)
+            .fileExporter(isPresented: $exporting, document: TextFile(text: exportText), contentType: .plainText,
+                          defaultFilename: "transcript") { _ in }
             Button("code", systemImage: "chevron.left.forwardslash.chevron.right") { app.showCode.toggle() }
-                .help(app.showCode ? "hide the code" : "show the code for this screen")
+                .help("show or hide the code for this screen")
         }
         ToolbarSpacer(.fixed, placement: .primaryAction)
         ToolbarItem(placement: .primaryAction) {
             Button("stats", systemImage: "chart.xyaxis.line") { app.showStats.toggle() }
-                .help(app.showStats ? "hide live stats" : "show live stats")
+                .help("show or hide live stats")
         }
     }
 
