@@ -19,6 +19,8 @@ final class RecordModel {
     private(set) var level: Float = 0
     private(set) var startedAt: Date?
     private(set) var fraction: Double = 0
+    /// the text so far while a job runs: finished pieces settled, the rest a draft
+    private(set) var update: TranscriptionUpdate?
     private(set) var transcript: Transcript?
     private(set) var error: FourierError?
 
@@ -62,6 +64,7 @@ final class RecordModel {
         error = nil
         level = 0
         fraction = 0
+        update = nil
         var speech = speech
         if let source {
             var options = speech.options
@@ -105,6 +108,12 @@ final class RecordModel {
             let recording = await recorder.stop()
             guard self.generation == generation else { return }
             let job = speech.transcriptionJob(recording)
+            let text = Task {
+                for await value in job.updates {
+                    guard self.generation == generation else { return }
+                    self.update = value
+                }
+            }
             let progress = Task {
                 for await value in job.progress {
                     guard self.generation == generation else { return }
@@ -113,13 +122,13 @@ final class RecordModel {
             }
             do {
                 let transcript = try await job.result
-                progress.cancel()
+                progress.cancel(); text.cancel()
                 guard self.generation == generation else { return }
                 self.transcript = transcript
                 self.phase = .idle
                 self.onFinish?(transcript)
             } catch {
-                progress.cancel()
+                progress.cancel(); text.cancel()
                 guard self.generation == generation else { return }
                 self.error = (error as? FourierError) ?? .engineFailure(String(describing: error))
                 self.phase = .idle

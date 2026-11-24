@@ -110,6 +110,13 @@ struct TranscribeScreen: View {
     }
 
     private var progress: some View {
+        VStack(spacing: 0) {
+            StreamingText(update: app.transcribe.update)
+            progressPanel
+        }
+    }
+
+    private var progressPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(app.transcribe.fileName ?? "audio")
                 .fourierTextStyle(.title)
@@ -204,6 +211,8 @@ struct RecordScreen: View {
                 }
                 .padding(32)
             case .transcribing:
+                VStack(spacing: 0) {
+                StreamingText(update: record.update)
                 VStack(alignment: .leading, spacing: 16) {
                     Text("transcribing the recording")
                         .fourierTextStyle(.title)
@@ -215,6 +224,7 @@ struct RecordScreen: View {
                 .frame(maxWidth: 400)
                 .fourierGlassPanel()
                 .padding(32)
+                }
             case .idle:
                 if let transcript = record.transcript {
                     TranscriptText(text: transcript.text, facts: TranscriptText.facts(duration: transcript.duration, speed: transcript.metrics.realtimeSpeed))
@@ -264,6 +274,27 @@ struct RecordScreen: View {
     private static let recordHint = "tap to record"
     private static let stopHint = "tap to stop"
     #endif
+}
+
+/// the text of a file or a recording as it is transcribed: finished pieces in the text colour,
+/// what is still being worked out in the draft colour, the newest words kept in view.
+private struct StreamingText: View {
+    let update: TranscriptionUpdate?
+
+    var body: some View {
+        ScrollView {
+            FourierLiveText(
+                settled: update?.settled ?? "",
+                draft: (update?.settled.isEmpty == false && update?.draft.isEmpty == false ? " " : "") + (update?.draft ?? ""))
+                .padding(.horizontal, 32)
+                .padding(.vertical, 24)
+                .frame(maxWidth: 960, alignment: .leading)
+                .frame(maxWidth: .infinity)
+        }
+        .defaultScrollAnchor(.top, for: .alignment)
+        .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        .fourierScrollEdges()
+    }
 }
 
 // MARK: listen

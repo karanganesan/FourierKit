@@ -18,9 +18,30 @@ struct PieceRequest: Sendable {
     var priority: Priority = .file
     /// how many ranked candidates to keep per step, for the golden test
     var recordCandidates: Int = 0
-    /// called after every decoder step of a greedy piece with the tokens generated so far, so live
-    /// text can grow token by token instead of arriving when the pass ends. called on the host.
+    /// called as the piece moves along with the share of its work done, 0...1: a little for the
+    /// encoder, a little for the prefill, then step by step against an estimate of how many tokens
+    /// this much audio becomes. it never reaches 1 before the piece is finished. called on the host.
+    var onProgress: (@Sendable (Double) -> Void)? = nil
+    /// called after every decoder step with the tokens generated so far, so text can grow token by
+    /// token instead of arriving when the piece ends. greedy tokens only ever grow. with beams it
+    /// is the leading beam, which can change wholesale until the piece is done. called on the host.
     var onTokens: (@Sendable ([Int32]) -> Void)? = nil
+}
+
+/// how far through its work one piece is. the shares are rough, from the measured stages of a
+/// two-minute clip: about a twentieth encoding, a tenth prefilling, the rest decoding.
+enum PieceProgress {
+    static let encoded = 0.05
+    static let prefilled = 0.15
+
+    /// decoding is measured against an estimate, about 3.6 tokens for each second of speech, and
+    /// eases toward the end so a clip with more words than expected slows down instead of stalling.
+    static func decoding(steps: Int, samples: Int, limit: Int) -> Double {
+        let expected = min(Double(limit), max(8, Double(samples) / 16_000 * 3.6 + 2))
+        let ratio = Double(steps) / expected
+        let share = ratio < 0.9 ? ratio : 0.9 + 0.09 * (1 - exp(-(ratio - 0.9) * 4))
+        return prefilled + (1 - prefilled) * min(0.99, share)
+    }
 }
 
 struct PieceTimings: Sendable {
@@ -305,6 +326,7 @@ actor EngineHost {
         }
         timings.encode = Self.now() - clock
 
+        request.onProgress?(PieceProgress.encoded)
         clock = Self.now()
         let base = Prompt.transcription(audioTokens: audio.count, language: request.language, context: request.context, tokenizer: tokenizer)
         let prompt = base + request.prefix
@@ -312,6 +334,7 @@ actor EngineHost {
         let (piece, firstRow) = try await engine.prefill(prompt: prompt, audio: audio, beams: settings.numBeams, maxNewTokens: settings.maxNewTokens)
         let logits = firstRow.values
         timings.prefill = Self.now() - clock
+        request.onProgress?(PieceProgress.prefilled)
 
         let vocabulary = engine.shape.vocabulary
         clock = Self.now()
@@ -330,6 +353,7 @@ actor EngineHost {
             piece.reorder(parents: outcome.parents)
             if request.recordCandidates > 0 { candidates.append(outcome.candidates) }
             search = .beam(beam)
+            request.onTokens?(beam.leading)
         } else {
             var greedy = GreedySearch(prompt: prompt, settings: settings, vocabularySize: vocabulary, recordCandidates: request.recordCandidates)
             let outcome = greedy.advance(logits: logits)
@@ -403,12 +427,15 @@ actor EngineHost {
                 item.piece.reorder(parents: outcome.parents)
                 if item.request.recordCandidates > 0 { item.candidates.append(outcome.candidates) }
                 item.search = .beam(beam)
+                if !beam.isFinished { item.request.onTokens?(beam.leading) }
             case .greedy(var greedy):
                 let outcome = greedy.advance(logits: slice)
                 if item.request.recordCandidates > 0 { item.candidates.append(outcome.candidates) }
                 item.search = .greedy(greedy)
                 item.request.onTokens?(greedy.result())
             }
+            item.request.onProgress?(PieceProgress.decoding(
+                steps: item.piece.steps, samples: item.request.samples.count, limit: item.request.settings.maxNewTokens))
             item.widest = max(item.widest, rows)
             if isFinished(item) { finished.append(index) }
             row += count

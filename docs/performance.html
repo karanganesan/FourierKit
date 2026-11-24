@@ -352,7 +352,7 @@ td .sig, th .sig { white-space: nowrap; }
 <tr><th scope="row">next lever 2</th><td>log-softmax and top-k on the gpu, to drop the 1.8 mb logits readback per step. small.</td></tr>
 <tr><th scope="row">next lever 3</th><td>the wait between live draft passes. each pass re-encodes the phrase, prefills it and re-decodes the unsettled tail before new text appears: 0.5 to 0.9 s at the 90th percentile. the 88 ms of weight widening per prefill is the cheapest part to remove, at the cost of 5.6 gb for a 32-bit copy.</td></tr>
 <tr><th scope="row">not measured</th><td>energy, an instruments trace of where work ran, the noise run through a real input, and a proper cool-against-hot comparison. forty minutes of back-to-back runs took sustained throughput from about 6x to 4.3x on this fanless mac.</td></tr>
-<tr><th scope="row">not verified</th><td>the real microphone flow on ios, voice processing, a full first-run download of the 4 gb checkpoint, voiceover, and anything on a real iphone past install: the app is installed and the model copied, but it has not been launched there.</td></tr>
+<tr><th scope="row">not verified</th><td>on a real iphone: the three golden clips give the reference text on an iphone 17 pro, but the token-level golden test has not run there, and the microphone, listen and record are untried. also unverified anywhere: voice processing, a full first-run download of the 4 gb checkpoint, and voiceover.</td></tr>
 </tbody></table></div>
 </section>
 <section aria-labelledby="tries"><h2 id="tries">tries</h2>

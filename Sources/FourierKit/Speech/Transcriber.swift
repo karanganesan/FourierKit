@@ -55,11 +55,12 @@ enum Transcriber {
     /// runs every range at once (the host batches them) and returns the outcomes in audio order.
     /// a piece that hits the token limit is split at its quietest point and decoded again.
     static func decode(samples: [Float], ranges: [Range<Int>], plan: DecodePlan,
-                       done: @escaping @Sendable (Int) -> Void = { _ in }) async throws -> [Outcome] {
+                       draft: (@Sendable (Int, [Int32], Bool) -> Void)? = nil,
+                       report: @escaping @Sendable (Int, Double) -> Void = { _, _ in }) async throws -> [Outcome] {
         try await withThrowingTaskGroup(of: (Int, [Outcome]).self) { group in
             for (index, range) in ranges.enumerated() {
                 group.addTask {
-                    (index, try await decodeRange(samples: samples, range: range, plan: plan, depth: 0, done: done))
+                    (index, try await decodeRange(samples: samples, range: range, plan: plan, depth: 0, draft: draft, report: report))
                 }
             }
             var results = [[Outcome]](repeating: [], count: ranges.count)
@@ -68,12 +69,21 @@ enum Transcriber {
         }
     }
 
+    /// - parameter report: a piece, named by its first sample, and how many of its samples are done.
+    ///   it moves while the piece runs, not only when it ends.
+    /// - parameter draft: a piece, the tokens it has so far, and whether they are its final ones
     private static func decodeRange(samples: [Float], range: Range<Int>, plan: DecodePlan, depth: Int,
-                                    done: @escaping @Sendable (Int) -> Void) async throws -> [Outcome] {
+                                    draft: (@Sendable (Int, [Int32], Bool) -> Void)?,
+                                    report: @escaping @Sendable (Int, Double) -> Void) async throws -> [Outcome] {
         try Task.checkCancellation()
-        let request = PieceRequest(
+        let key = range.lowerBound
+        let size = Double(range.count)
+        var building = PieceRequest(
             samples: Array(samples[range]), language: plan.language, context: plan.context,
             settings: plan.settings, priority: plan.priority)
+        building.onProgress = { fraction in report(key, size * fraction) }
+        if let draft { building.onTokens = { tokens in draft(key, tokens, false) } }
+        let request = building
         let sent = now()
         let result = try await returningOnCancel { try await EngineHost.shared.transcribe(request) }
         await Runtime.shared.recordPiece(
@@ -82,11 +92,15 @@ enum Transcriber {
         // a piece that never reached a stop token was cut by the limit, so it runs again in halves
         if !result.reachedStop, depth < 6, range.count >= 2 * 16_000,
            let (first, second) = AudioSplitter.split(samples: samples, range: range) {
-            async let a = decodeRange(samples: samples, range: first, plan: plan, depth: depth + 1, done: done)
-            async let b = decodeRange(samples: samples, range: second, plan: plan, depth: depth + 1, done: done)
+            // the halves start again from nothing. the first one shares this piece's name.
+            report(key, 0)
+            draft?(key, [], false)
+            async let a = decodeRange(samples: samples, range: first, plan: plan, depth: depth + 1, draft: draft, report: report)
+            async let b = decodeRange(samples: samples, range: second, plan: plan, depth: depth + 1, draft: draft, report: report)
             return try await a + b
         }
-        done(range.count)
+        report(key, size)
+        draft?(key, result.tokens, true)
         return [Outcome(range: range, result: result, sent: sent, splitDepth: depth)]
     }
 
@@ -149,12 +163,24 @@ public final class TranscriptionJob: Sendable {
     public let id: UUID
     private let task: Task<Transcript, any Error>
     private let progressFeed: Broadcaster<Double>
+    private let updateFeed: Broadcaster<TranscriptionUpdate>
 
     /// fraction of the audio done, 0...1, newest value only. ends when the job ends.
     public var progress: AsyncStream<Double> { progressFeed.stream() }
 
     /// the latest fraction done
     public var fraction: Double { progressFeed.latest ?? 0 }
+
+    /// the text so far while the job runs, newest value only. ends when the job ends.
+    ///
+    /// `settled` is the text of the pieces that are finished, from the start of the audio, and never
+    /// changes. `draft` is what the engine currently has for the audio after that, and can change on
+    /// any update. with beam search, the default, even one short clip's draft can be rewritten
+    /// before it ends. the transcript from `result` is the one to keep.
+    public var updates: AsyncStream<TranscriptionUpdate> { updateFeed.stream() }
+
+    /// the latest update, if any text has arrived
+    public var latestUpdate: TranscriptionUpdate? { updateFeed.latest }
 
     /// waits for the transcript. cancelling the waiting task does not cancel the job; `cancel()` does.
     public var result: Transcript {
@@ -175,20 +201,24 @@ public final class TranscriptionJob: Sendable {
     init(input: TranscriptionInput, options: FourierOptions) {
         let id = UUID()
         let feed = Broadcaster<Double>(initial: 0)
+        let updates = Broadcaster<TranscriptionUpdate>()
         self.id = id
         progressFeed = feed
+        updateFeed = updates
         task = Task.detached(priority: .userInitiated) {
             let runtime = Runtime.shared
             let job = await runtime.register(.transcribe, phase: .preparing)
             do {
-                let transcript = try await Self.run(input: input, options: options, job: job, feed: feed)
+                let transcript = try await Self.run(input: input, options: options, job: job, feed: feed, updates: updates)
                 await runtime.end(job)
                 feed.finish(with: 1)
+                updates.finish(with: TranscriptionUpdate(settled: transcript.text, draft: ""))
                 return transcript
             } catch {
                 let wrapped = FourierError.wrap(error)
                 await runtime.end(job, error: wrapped)
                 feed.finish()
+                updates.finish()
                 throw wrapped
             }
         }
@@ -202,7 +232,8 @@ public final class TranscriptionJob: Sendable {
         }
     }
 
-    private static func run(input: TranscriptionInput, options: FourierOptions, job: UUID, feed: Broadcaster<Double>) async throws -> Transcript {
+    private static func run(input: TranscriptionInput, options: FourierOptions, job: UUID, feed: Broadcaster<Double>,
+                            updates: Broadcaster<TranscriptionUpdate>) async throws -> Transcript {
         let runtime = Runtime.shared
         let started = now()
         // the audio is read while the engine gets ready
@@ -218,11 +249,41 @@ public final class TranscriptionJob: Sendable {
 
         let ranges = Transcriber.ranges(samples: samples, chunking: options.chunking)
         let total = samples.count
-        let doneCount = Locked(0)
-        let outcomes = try await Transcriber.decode(samples: samples, ranges: ranges, plan: plan) { count in
-            let fraction = Double(doneCount.update { $0 += count; return $0 }) / Double(total)
-            feed.send(min(1, fraction))
-            Task { await runtime.update(job, progress: .some(min(1, fraction))) }
+        // samples done in each piece, by the piece's first sample. the fraction only moves forward.
+        let pieces = Locked<(done: [Int: Double], shown: Double)>(([:], 0))
+        // text so far: each piece's newest tokens, by its first sample. finished pieces from the
+        // start of the audio are settled, everything after is draft.
+        let tokenizer = await EngineHost.shared.tokenizer
+        let eos = Set(plan.settings.eosTokenIDs)
+        let texts = Locked<[Int: (text: String, final: Bool)]>([:])
+        let order = ranges.map(\.lowerBound)
+        let outcomes = try await Transcriber.decode(samples: samples, ranges: ranges, plan: plan, draft: { key, tokens, final in
+            guard let tokenizer else { return }
+            let text = tokenizer.decode(tokens.filter { !eos.contains($0) }, skipSpecialTokens: true)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let update: TranscriptionUpdate = texts.update { state in
+                state[key] = (text, final)
+                // pieces in order. a piece cut in halves reports under new names, which sort in place.
+                let keys = (Set(order).union(state.keys)).sorted()
+                var settled: [String] = [], draft: [String] = [], open = false
+                for key in keys {
+                    guard let entry = state[key], !entry.text.isEmpty else { if state[key]?.final != true { open = true }; continue }
+                    if entry.final, !open { settled.append(entry.text) } else { open = true; draft.append(entry.text) }
+                }
+                return TranscriptionUpdate(settled: settled.joined(separator: " "), draft: draft.joined(separator: " "))
+            }
+            updates.send(update)
+        }) { key, samplesDone in
+            let fraction: Double? = pieces.update { state in
+                state.done[key] = samplesDone
+                let now = min(1, state.done.values.reduce(0, +) / Double(max(1, total)))
+                guard now > state.shown else { return nil }
+                state.shown = now
+                return now
+            }
+            guard let fraction else { return }
+            feed.send(fraction)
+            Task { await runtime.update(job, progress: .some(fraction)) }
         }
         let transcript = Transcriber.transcript(outcomes: outcomes, audioSamples: total, plan: plan, started: started)
         await runtime.recordLive(timeToFirstText: transcript.metrics.timeToFirstText)

@@ -360,6 +360,12 @@ struct BeamSearch: Sendable {
     private(set) var isFinished = false
     private(set) var step = 0
 
+    /// what the leading running beam has generated so far. a look at work in progress: beam search
+    /// may still prefer another beam, so this can change wholesale before the piece ends.
+    var leading: [Int32] {
+        Array(running[0].dropFirst(prompt.count))
+    }
+
     // scratch reused across steps
     private var accumulated: [Float]
     private var heap: [TopK.Entry] = []

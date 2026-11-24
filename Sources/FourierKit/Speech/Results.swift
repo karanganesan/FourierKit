@@ -66,6 +66,23 @@ public struct TranscriptMetrics: Sendable, Hashable {
     public init() {}
 }
 
+/// the text of a file or a recording while it is still being transcribed.
+public struct TranscriptionUpdate: Sendable, Hashable {
+    /// text of the finished pieces from the start of the audio. never changes, only grows.
+    public var settled: String
+    /// what the engine currently has after that. may change, may be empty.
+    public var draft: String
+    /// settled + draft, the best full text so far
+    public var text: String {
+        settled.isEmpty || draft.isEmpty ? settled + draft : settled + " " + draft
+    }
+
+    public init(settled: String, draft: String) {
+        self.settled = settled
+        self.draft = draft
+    }
+}
+
 /// raw 16 khz mono audio from record().
 public struct Recording: Sendable, Hashable {
     public static let sampleRate = 16_000.0

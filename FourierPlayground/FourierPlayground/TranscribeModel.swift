@@ -13,6 +13,8 @@ final class TranscribeModel {
 
     private(set) var fileName: String?
     private(set) var fraction: Double = 0
+    /// the text so far while a job runs: finished pieces settled, the rest a draft
+    private(set) var update: TranscriptionUpdate?
     private(set) var isRunning = false
     private(set) var transcript: Transcript?
     private(set) var error: FourierError?
@@ -34,6 +36,7 @@ final class TranscribeModel {
         let name = url.lastPathComponent
         fileName = name
         fraction = 0
+        update = nil
         transcript = nil
         error = nil
         isRunning = true
@@ -44,6 +47,12 @@ final class TranscribeModel {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             let job = speech.transcriptionJob(contentsOf: url)
             self.job = job
+            let text = Task {
+                for await value in job.updates {
+                    guard self.generation == generation else { return }
+                    self.update = value
+                }
+            }
             let progress = Task {
                 for await value in job.progress {
                     guard self.generation == generation else { return }
@@ -52,7 +61,7 @@ final class TranscribeModel {
             }
             do {
                 let transcript = try await job.result
-                progress.cancel()
+                progress.cancel(); text.cancel()
                 guard self.generation == generation else { return }
                 self.fraction = 1
                 self.transcript = transcript
@@ -60,7 +69,7 @@ final class TranscribeModel {
                 self.job = nil
                 self.onFinish?(transcript, name)
             } catch {
-                progress.cancel()
+                progress.cancel(); text.cancel()
                 guard self.generation == generation else { return }
                 let error = (error as? FourierError) ?? .engineFailure(String(describing: error))
                 if error != .cancelled { self.error = error }
@@ -86,5 +95,6 @@ final class TranscribeModel {
         transcript = nil
         error = nil
         fraction = 0
+        update = nil
     }
 }
