@@ -6,7 +6,7 @@ import Foundation
 /// streams are produced off the main actor and coalesced to at most one value per frame.
 public final class Fourier: Sendable {
     /// the sdk's version. the package itself is versioned by its git tag, which matches this.
-    public static let version = "0.0.1"
+    public static let version = "0.0.2"
 
     public let options: FourierOptions
     private let runtime = Runtime.shared

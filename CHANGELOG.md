@@ -1,6 +1,15 @@
 # changelog
 
-## 0.0.1 (unreleased)
+## 0.0.2
+
+- the app is one glass surface that follows light and dark, with a floating glass bar for live controls, glass panels for loading and progress, three type sizes and three text levels.
+- a code pane shows the swift for the current screen: adding the package, options that differ from the defaults, and the calls.
+- the sidebar draws one quiet selection, selects every recent with command a or control a, and asks before deleting several.
+- what scrolls fades out at the top and bottom of every pane.
+- live text no longer flashes on updates, and a live transcript's speed is the engine's, not the session's.
+- prefill attention runs on the matrix kernel: the long clip's prefill went from 3.1 s to 2.3 s.
+
+## 0.0.1
 
 nothing is released yet. this is what exists in the repo.
 
