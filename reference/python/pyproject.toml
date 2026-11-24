@@ -1,0 +1,12 @@
+[project]
+name = "fourier-reference"
+version = "0"
+description = "runs transformers to make the golden set. it never ships."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "torch==2.9.1",
+  "numpy",
+  "soundfile",
+  "safetensors",
+  "transformers @ git+https://github.com/huggingface/transformers@d8f10a82213a3a9db48385aba3a4b57ab535de50",
+]

@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>fourier: performance</title>
+<link rel="preconnect" href="https://cdn.karanganesan.com" crossorigin>
+<link rel="preload" href="https://cdn.karanganesan.com/1794861360796-04033bdf1852/fonts/allo/AlloVariable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="https://cdn.karanganesan.com/1794861360796-04033bdf1852/fonts/allo/allo.css">
+<style>
+:root {
+  color-scheme: dark;
+  --w8: rgb(255 255 255 / .08);
+  --w16: rgb(255 255 255 / .16);
+  --w24: rgb(255 255 255 / .24);
+  --w56: rgb(255 255 255 / .56);
+  --w64: rgb(255 255 255 / .64);
+  --npu: #fff;
+  --gpu: rgb(255 255 255 / .56);
+  --cpu: rgb(255 255 255 / .16);
+  --ease: cubic-bezier(.23, 1, .32, 1);
+  font-family: Allo, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-optical-sizing: auto;
+}
+* { box-sizing: border-box; }
+html { background: #000; -webkit-text-size-adjust: 100%; scroll-padding-top: 80px; }
+body {
+  margin: 0;
+  background: #000;
+  color: #fff;
+  font-size: 16px;
+  line-height: 24px;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+a { color: inherit; text-decoration: none; }
+@media (hover: hover) and (pointer: fine) { a:hover { text-decoration: underline; } }
+:focus-visible { outline: 2px solid rgb(255 255 255 / .48); outline-offset: 2px; }
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  gap: 8px;
+  padding: 16px max(24px, env(safe-area-inset-left));
+  background: rgb(0 0 0 / .8);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.top a {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  color: var(--w64);
+  font-size: 14px;
+}
+.top a[aria-current] { background: var(--w16); color: #fff; }
+main { width: min(100%, 1072px); margin: 0 auto; padding: 48px 24px 96px; }
+h1, h2, h3 { font-weight: 600; text-wrap: balance; margin: 0; }
+h1 { font-size: 48px; line-height: 56px; letter-spacing: -.032em; max-width: 800px; }
+h2 { font-size: 32px; line-height: 40px; letter-spacing: -.024em; margin-top: 96px; }
+h3 { font-size: 16px; line-height: 24px; }
+p, li { text-wrap: pretty; }
+p { margin: 16px 0 0; max-width: 720px; }
+.lead { font-size: 24px; line-height: 32px; letter-spacing: -.012em; color: var(--w64); margin-top: 24px; }
+.dim { color: var(--w64); }
+.small { font-size: 14px; line-height: 24px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+code { padding: 2px 4px; border-radius: 4px; background: var(--w8); }
+pre { margin: 24px 0 0; padding: 24px; overflow-x: auto; border-radius: 16px; background: var(--w8); line-height: 24px; }
+pre code { padding: 0; background: none; }
+.panel, pre, .table-wrap, .flow-group, .way, .tile i, .lane, .status { border-radius: 16px; }
+@supports (corner-shape: superellipse(1.74)) {
+  .panel, pre, .table-wrap, .flow-group, .way, .lane, .status { corner-shape: superellipse(1.74); border-radius: 24.46px; }
+  .tile i, code { corner-shape: superellipse(1.74); border-radius: 6.11px; }
+  .top a, button { corner-shape: round; }
+}
+.status { display: inline-block; margin-top: 24px; padding: 8px 16px; background: var(--w8); color: var(--w64); font-size: 14px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 32px; font-size: 14px; color: var(--w64); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend b { width: 16px; height: 16px; border-radius: 4px; }
+.n { background: var(--npu); } .g { background: var(--gpu); } .c { background: var(--cpu); }
+
+.flow { display: grid; grid-template-columns: 1fr 24px 1fr 24px 1.32fr 24px 1fr; align-items: stretch; gap: 8px; margin-top: 32px; }
+.flow-group { padding: 24px; background: var(--w8); }
+.flow-group h3 { margin-bottom: 8px; }
+.flow-group ol { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
+.flow-group li { display: flex; align-items: center; gap: 8px; }
+.flow-group li b { flex: none; display: inline-flex; gap: 2px; width: 32px; }
+.flow-group li b i { width: 8px; height: 8px; border-radius: 2px; }
+.flow-group .x { opacity: 0; }
+.arrow { align-self: center; justify-self: center; color: var(--w56); }
+.repeat { display: inline-flex; align-items: center; gap: 8px; color: var(--w64); font-size: 14px; }
+
+.table-wrap { margin-top: 24px; overflow-x: auto; background: var(--w8); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 24px; }
+th, td { padding: 12px 16px; text-align: left; vertical-align: top; }
+thead th { color: var(--w64); font-weight: 500; white-space: nowrap; }
+tbody tr:nth-child(odd) td, tbody tr:nth-child(odd) th { background: rgb(255 255 255 / .04); }
+.steps th[scope=row] { min-width: 288px; font-weight: 400; }
+.steps .num { display: inline-block; width: 24px; color: var(--w56); font-variant-numeric: tabular-nums; }
+.steps strong { font-weight: 600; }
+.steps small { display: block; margin: 4px 0 0 24px; color: var(--w64); font-size: 14px; line-height: 24px; }
+.group-row th { background: var(--w16) !important; font-weight: 600; }
+.chipcell { width: 88px; text-align: center; vertical-align: middle; }
+.mark { display: inline-flex; align-items: center; justify-content: center; min-width: 64px; height: 24px; padding: 0 8px; border-radius: 999px; font-size: 12px; line-height: 16px; }
+.race-n { background: var(--npu); color: #000; }
+.race-g { background: var(--gpu); color: #000; }
+.run-c { background: var(--w24); color: #fff; }
+.back { color: var(--w56); }
+.none { color: var(--w24); }
+
+.switch { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+button {
+  height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--w8);
+  color: var(--w64);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 120ms var(--ease), background-color 120ms var(--ease), color 120ms var(--ease);
+}
+button:active { transform: scale(.97); }
+button[aria-pressed=true] { background: #fff; color: #000; }
+@media (hover: hover) and (pointer: fine) { button[aria-pressed=false]:hover { background: var(--w16); color: #fff; } }
+.note { min-height: 48px; margin-top: 16px; color: var(--w64); }
+.packer { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; margin-top: 16px; }
+.lanes { position: relative; height: 384px; }
+.lane-labels { position: relative; height: 384px; font-size: 14px; color: var(--w64); }
+.lane-labels span { position: absolute; left: 0; display: flex; align-items: center; }
+.lane { position: absolute; left: 0; right: 0; background: var(--w8); }
+.free { display: flex; align-items: center; justify-content: center; color: var(--w56); font-size: 12px; }
+.tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(100% / 12);
+  height: 24px;
+  padding: 2px;
+  transition: transform 320ms var(--ease), opacity 160ms var(--ease);
+  will-change: transform;
+}
+.tile i {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  transition: background-color 160ms var(--ease), color 160ms var(--ease);
+}
+.tile.hidden { opacity: 0; }
+.stat { margin-bottom: 8px; font-size: 32px; line-height: 40px; font-weight: 600; letter-spacing: -.024em; font-variant-numeric: tabular-nums; }
+.tile.on-n i { background: var(--npu); color: #000; }
+.tile.on-g i { background: var(--gpu); color: #000; }
+.tile.on-c i { background: var(--w24); color: #fff; }
+
+.ways { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 24px; }
+.way { padding: 24px; background: var(--w8); }
+.way p { margin-top: 8px; font-size: 14px; color: var(--w64); }
+.mini { display: grid; gap: 2px; margin-bottom: 16px; height: 64px; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(3, 1fr); }
+.mini i { border-radius: 2px; background: rgb(255 255 255 / .04); }
+.mini .n { background: var(--npu); } .mini .g { background: var(--gpu); } .mini .c { background: var(--w24); }
+
+.bars { display: grid; gap: 16px; margin-top: 24px; padding: 24px; background: var(--w8); }
+.bar-row { display: grid; grid-template-columns: 192px minmax(0, 1fr) 128px; align-items: center; gap: 16px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.bar { height: 24px; border-radius: 4px; background: var(--gpu); transform-origin: left; }
+.bar-row span:last-child { text-align: right; color: var(--w64); }
+
+ol.rules { margin: 24px 0 0; padding-left: 24px; max-width: 720px; }
+ol.rules li + li { margin-top: 8px; }
+footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
+
+/* plan page */
+.prose h2 { scroll-margin-top: 80px; }
+.prose ul, .prose ol { margin: 16px 0 0; padding-left: 24px; max-width: 720px; }
+.prose li + li { margin-top: 8px; }
+.prose li > ul, .prose li > ol { margin-top: 8px; }
+.prose strong { font-weight: 600; }
+.prose table code { white-space: nowrap; }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 32px; font-size: 14px; }
+.toc a { display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border-radius: 999px; background: var(--w8); color: var(--w64); }
+
+@media (max-width: 880px) {
+  h1 { font-size: 32px; line-height: 40px; }
+  h2 { font-size: 24px; line-height: 32px; margin-top: 64px; }
+  .lead { font-size: 16px; line-height: 24px; }
+  main { padding-top: 24px; }
+  .flow { grid-template-columns: 1fr; }
+  .arrow { transform: rotate(90deg); }
+  .ways { grid-template-columns: 1fr; }
+  .packer { grid-template-columns: 40px minmax(0, 1fr); }
+  .tile i { font-size: 8px; }
+  .bar-row { grid-template-columns: 120px minmax(0, 1fr) 72px; gap: 8px; }
+  .steps th[scope=row] { min-width: 224px; }
+  button { height: 48px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile { transition: opacity 160ms ease; }
+  button { transition: none; }
+  button:active { transform: none; }
+}
+
+/* api and performance pages */
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+thead th.num { text-align: right; }
+td.mono, th.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+.mark.pass { background: #fff; color: #000; }
+.mark.fail { background: var(--w24); color: #fff; }
+.chart { margin-top: 24px; padding: 24px; background: var(--w8); border-radius: 16px; }
+@supports (corner-shape: superellipse(1.74)) { .chart { corner-shape: superellipse(1.74); border-radius: 24.46px; } }
+.chart { overflow-x: auto; }
+.chart svg { display: block; width: 100%; min-width: 640px; height: auto; }
+.chart text { fill: rgb(255 255 255 / .64); font-family: inherit; font-size: 12px; font-variant-numeric: tabular-nums; }
+.chart .grid { stroke: rgb(255 255 255 / .08); stroke-width: 1; }
+.chart .s1 { stroke: #fff; fill: none; stroke-width: 2; }
+.chart .s2 { stroke: rgb(255 255 255 / .56); fill: none; stroke-width: 2; stroke-dasharray: 2 6; stroke-linecap: round; }
+.chart .p1 { stroke: #fff; stroke-width: 2; }
+.chart .p2 { stroke: rgb(255 255 255 / .56); stroke-width: 2; }
+.chart .full { fill: #fff; }
+.chart .full.p2 { fill: rgb(255 255 255 / .56); }
+.chart .hollow { fill: #000; }
+.sw { display: inline-block; width: 16px; height: 2px; vertical-align: middle; background: #fff; }
+.sw.dots { background: none; border-top: 2px dotted rgb(255 255 255 / .56); height: 0; }
+.api-toc { margin-top: 32px; }
+.sig { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+td .sig, th .sig { white-space: nowrap; }
+@media (max-width: 880px) { .chart { padding: 16px; } }</style>
+</head>
+<body>
+<nav class="top" aria-label="docs">
+  <a href="plan.html">plan</a>
+  <a href="architecture.html">architecture</a>
+  <a href="api.html">api</a>
+  <a href="performance.html" aria-current="page">performance</a>
+</nav>
+<main>
+<h1>performance</h1>
+<p class="lead">every golden run, measured end to end. the numbers on this page come from the log, and nothing here is a goal.</p>
+<p class="status">4 runs logged, 3 passed, 1 failed. newest passing: 2026-11-24 04:58 utc, plateau: gpu encoder and decoder, quiet machine</p>
+<section aria-labelledby="scoreboard"><h2 id="scoreboard">scoreboard</h2>
+<p class="dim">the newest passing run: 2026-11-24 04:58 utc, "plateau: gpu encoder and decoder, quiet machine". speed is audio seconds per wall second, from the median of the warm repeats. a failed run is never shown here.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="scoreboard by clip"><table>
+<thead><tr><th scope="col">per clip</th><th scope="col" class="num">short</th><th scope="col" class="num">medium</th><th scope="col" class="num">long</th></tr></thead>
+<tbody>
+<tr><th scope="row">audio</th><td class="num">3.70 s</td><td class="num">11.20 s</td><td class="num">116.50 s</td></tr>
+<tr><th scope="row">wall time, warm</th><td class="num">839 ms</td><td class="num">1.78 s</td><td class="num">19.26 s</td></tr>
+<tr><th scope="row">wall time, cold</th><td class="num">1.22 s</td><td class="num">1.78 s</td><td class="num">18.39 s</td></tr>
+<tr><th scope="row">speed</th><td class="num">4.41x</td><td class="num">6.29x</td><td class="num">6.05x</td></tr>
+<tr><th scope="row">tokens</th><td class="num">12</td><td class="num">27</td><td class="num">282</td></tr>
+<tr><th scope="row">tokens per second</th><td class="num">14.3</td><td class="num">15.2</td><td class="num">14.6</td></tr>
+<tr><th scope="row">decoder steps</th><td class="num">13</td><td class="num">30</td><td class="num">285</td></tr>
+<tr><th scope="row">decoder steps per second</th><td class="num">21.7</td><td class="num">21.6</td><td class="num">19.5</td></tr>
+<tr><th scope="row">time to first text</th><td class="num">285 ms</td><td class="num">438 ms</td><td class="num">4.15 s</td></tr>
+<tr><th scope="row">mel</th><td class="num">0.21 ms</td><td class="num">0.46 ms</td><td class="num">3.77 ms</td></tr>
+<tr><th scope="row">encode</th><td class="num">60 ms</td><td class="num">116 ms</td><td class="num">847 ms</td></tr>
+<tr><th scope="row">prefill</th><td class="num">224 ms</td><td class="num">321 ms</td><td class="num">3.11 s</td></tr>
+<tr><th scope="row">decode</th><td class="num">554 ms</td><td class="num">1.34 s</td><td class="num">14.58 s</td></tr>
+<tr><th scope="row">safety margin used</th><td class="num">4%</td><td class="num">24%</td><td class="num">8%</td></tr>
+</tbody>
+</table></div>
+<p class="small dim">time in mel, encode, prefill and decode is the best warm repeat. margin used is the share of the safety margin the closest beam comparison took: it must stay under 100%.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="scoreboard for the whole run"><table>
+<thead><tr><th scope="col">whole run</th><th scope="col" class="num">value</th></tr></thead>
+<tbody>
+<tr><th scope="row">batch throughput</th><td class="num">5.51x</td></tr>
+<tr><th scope="row">sustained throughput</th><td class="num">6.11x</td></tr>
+<tr><th scope="row">cold load</th><td class="num">123 ms</td></tr>
+<tr><th scope="row">warm load</th><td class="num">90 ms</td></tr>
+<tr><th scope="row">peak memory</th><td class="num">4.01 gb</td></tr>
+<tr><th scope="row">thermal state</th><td class="num"><span>fair</span></td></tr>
+<tr><th scope="row">placement</th><td class="num"><span>mel cpu, encoder gpu, decoder gpu, search cpu</span></td></tr>
+<tr><th scope="row">golden test</th><td class="num"><span class="mark pass">passed</span></td></tr>
+</tbody>
+</table></div>
+<p class="small dim">batch throughput is the three clips decoded together. sustained throughput is the three clips three times over at the widest batch. both are audio seconds per wall second.</p>
+</section>
+<section aria-labelledby="baselines"><h2 id="baselines">baselines</h2>
+<p class="dim">the reference is hugging face transformers on this mac (transformers 5.24.0.dev0, torch 2.9.1), cpu, float32, 4 threads, a batch of one. its speed is the clip's audio length divided by the <code>reference_seconds</code> recorded when the golden set was made. the 8-bit mlx build and the q8 gguf are a lower-precision class and are not measured here.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="transformers against fourierkit"><table>
+<thead><tr><th scope="col">per clip</th><th scope="col" class="num">short</th><th scope="col" class="num">medium</th><th scope="col" class="num">long</th></tr></thead>
+<tbody>
+<tr><th scope="row">audio</th><td class="num">3.70 s</td><td class="num">11.20 s</td><td class="num">116.50 s</td></tr>
+<tr><th scope="row">transformers, wall time</th><td class="num">3.36 s</td><td class="num">9.51 s</td><td class="num">143.59 s</td></tr>
+<tr><th scope="row">transformers, speed</th><td class="num">1.10x</td><td class="num">1.18x</td><td class="num">0.81x</td></tr>
+<tr><th scope="row">fourierkit, speed</th><td class="num">4.41x</td><td class="num">6.29x</td><td class="num">6.05x</td></tr>
+<tr><th scope="row">fourierkit against transformers</th><td class="num">4.00x</td><td class="num">5.34x</td><td class="num">7.46x</td></tr>
+</tbody>
+</table></div>
+<p class="small dim">the last row is how many times faster than transformers the newest passing run is. under 1.00x means slower.</p>
+</section>
+<section aria-labelledby="climb"><h2 id="climb">the climb</h2>
+<p class="dim">speed on the long clip and sustained throughput, run by run in the order they were logged. a filled point passed the golden test. a hollow point failed it. the numbers under the chart name each run.</p>
+<div class="legend"><span><i class="sw"></i>long clip speed</span><span><i class="sw dots"></i>sustained throughput</span></div>
+<div class="chart"><svg viewBox="0 0 960 320" role="img" aria-label="long clip speed and sustained throughput by run, in x realtime"><title>long clip speed and sustained throughput by run, in x realtime</title><line class="grid" x1="48.0" x2="936.0" y1="280.0" y2="280.0"/><text x="40.0" y="284.0" text-anchor="end">0x</text><line class="grid" x1="48.0" x2="936.0" y1="214.0" y2="214.0"/><text x="40.0" y="218.0" text-anchor="end">2x</text><line class="grid" x1="48.0" x2="936.0" y1="148.0" y2="148.0"/><text x="40.0" y="152.0" text-anchor="end">4x</text><line class="grid" x1="48.0" x2="936.0" y1="82.0" y2="82.0"/><text x="40.0" y="86.0" text-anchor="end">6x</text><line class="grid" x1="48.0" x2="936.0" y1="16.0" y2="16.0"/><text x="40.0" y="20.0" text-anchor="end">8x</text><text x="48.0" y="308.0" text-anchor="middle">1</text><text x="344.0" y="308.0" text-anchor="middle">2</text><text x="640.0" y="308.0" text-anchor="middle">3</text><text x="936.0" y="308.0" text-anchor="middle">4</text><path class="s1" d="M48.0 202.2 L344.0 176.7 L640.0 127.2 L936.0 80.3 " stroke-linejoin="round"/><circle class="full p1" cx="48.0" cy="202.2" r="4"><title>run 1, long clip speed: 2.36x</title></circle><circle class="hollow p1" cx="344.0" cy="176.7" r="4"><title>run 2, long clip speed: 3.13x, failed</title></circle><circle class="full p1" cx="640.0" cy="127.2" r="4"><title>run 3, long clip speed: 4.63x</title></circle><circle class="full p1" cx="936.0" cy="80.3" r="4"><title>run 4, long clip speed: 6.05x</title></circle><path class="s2" d="M48.0 244.4 L344.0 169.1 L640.0 189.1 L936.0 78.3 " stroke-linejoin="round"/><circle class="full p2" cx="48.0" cy="244.4" r="4"><title>run 1, sustained throughput: 1.08x</title></circle><circle class="hollow p2" cx="344.0" cy="169.1" r="4"><title>run 2, sustained throughput: 3.36x, failed</title></circle><circle class="full p2" cx="640.0" cy="189.1" r="4"><title>run 3, sustained throughput: 2.76x</title></circle><circle class="full p2" cx="936.0" cy="78.3" r="4"><title>run 4, sustained throughput: 6.11x</title></circle></svg></div><div class="table-wrap" tabindex="0" role="region" aria-label="every logged run"><table><thead><tr><th scope="col" class="num">run</th><th scope="col">date</th><th scope="col">label</th><th scope="col" class="num">long speed</th><th scope="col" class="num">batch throughput</th><th scope="col" class="num">sustained</th><th scope="col">golden test</th></tr></thead><tbody>
+<tr><th scope="row" class="num">1</th><td>2026-11-24 01:59 utc</td><td>first end-to-end run, gpu, machine busy</td><td class="num">2.36x</td><td class="num">2.73x</td><td class="num">1.08x</td><td><span class="mark pass">passed</span></td></tr>
+<tr><th scope="row" class="num">2</th><td>2026-11-24 04:16 utc</td><td>wide multiplies on apple's kernel, parallel norm and attention</td><td class="num">3.13x</td><td class="num">4.86x</td><td class="num">3.36x</td><td><span class="mark fail">failed</span></td></tr>
+<tr><th scope="row" class="num">3</th><td>2026-11-24 04:37 utc</td><td>new long clip, two-sum kernel, gpu encoder and decoder, machine shared</td><td class="num">4.63x</td><td class="num">3.89x</td><td class="num">2.76x</td><td><span class="mark pass">passed</span></td></tr>
+<tr><th scope="row" class="num">4</th><td>2026-11-24 04:58 utc</td><td>plateau: gpu encoder and decoder, quiet machine</td><td class="num">6.05x</td><td class="num">5.51x</td><td class="num">6.11x</td><td><span class="mark pass">passed</span></td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px">why runs failed</h3>
+<ul class="rules">
+<li>run 2: line 165: long: a beam comparison uses 1.3695652173913044 of its safety margin</li>
+</ul>
+</section>
+<section aria-labelledby="method"><h2 id="method">method</h2>
+<p class="dim">how a number gets onto this page.</p>
+<ol class="rules">
+<li>one test produces every line: <code>swift test -c release</code>, the golden test. it needs the model prepared and the golden tensors. there are no other tests.</li>
+<li>the reference is hugging face transformers at one pinned commit, running the pinned checkpoint on the cpu in 32-bit float with a batch of one. it is frozen in <code>golden/</code>.</li>
+<li>a run passes only if all three clips give the reference's token ids and text, stop at the same token, give bit-identical scores on repeat, alone, in a wide batch, after a slot refill and after a reload, and keep every beam comparison inside its safety margin. a run that fails any of these is logged as failed and never counts as a result.</li>
+<li>each clip runs five times. the first is the cold run. the median of the four warm runs is the wall time, and speed is the clip's audio length divided by it. time in mel, encode, prefill and decode is the best warm run.</li>
+<li>release builds, a quiet machine and a nominal thermal state. the thermal state is logged with every run. this mac has no fan, so long runs can slow down as it heats up, which is why sustained throughput is recorded apart from the single-clip speeds.</li>
+<li>a tie is within 3%. only a change that is exact and beats noise is kept.</li>
+<li>timing runs go one at a time. the machine's state is in each run's label when it was not quiet.</li>
+</ol>
+<p class="small dim">the log is <code>docs/performance.jsonl</code>, one json line per run. this page is rebuilt from it with <code>swift scripts/performance.swift</code>.</p>
+</section>
+<section aria-labelledby="live"><h2 id="live">live replay</h2>
+<p class="dim">each golden clip played in at real speed through <code>listen</code>, from the run labelled plateau: gpu encoder and decoder, quiet machine. settled text was never taken back, and every final phrase equals <code>transcribe</code> on the same split points.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="live replay by clip"><table>
+<thead><tr><th scope="col">clip</th><th scope="col" class="num">first text</th><th scope="col" class="num">median draft delay</th><th scope="col" class="num">worst delay</th><th scope="col" class="num">updates</th><th scope="col" class="num">draft changes</th><th scope="col" class="num">phrases</th><th scope="col" class="num">finish waited</th></tr></thead>
+<tbody>
+<tr><th scope="row">short</th><td class="num">1.09 s</td><td class="num">440 ms</td><td class="num">480 ms</td><td class="num">7</td><td class="num">6</td><td class="num">1</td><td class="num">1.61 s</td></tr>
+<tr><th scope="row">medium</th><td class="num">1.07 s</td><td class="num">540 ms</td><td class="num">780 ms</td><td class="num">18</td><td class="num">16</td><td class="num">1</td><td class="num">2.92 s</td></tr>
+<tr><th scope="row">long</th><td class="num">686 ms</td><td class="num">820 ms</td><td class="num">4.28 s</td><td class="num">106</td><td class="num">102</td><td class="num">8</td><td class="num">4.19 s</td></tr>
+</tbody>
+</table></div></section>
+<section aria-labelledby="standing"><h2 id="standing">where it stands</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="where it stands"><table><tbody>
+<tr><th scope="row">ceiling, decode</th><td>each step reads 3.44 gb of weights (2.82 gb of layers and 0.62 gb for the output head) plus the cache: 229 kb per context token per beam, about 1.2 gb for three beams at a 1,700-token context. at the measured 79 to 91 gb/s that caps a single clip near 26 steps per second with a short context and near 20 with a long one.</td></tr>
+<tr><th scope="row">now, decode</th><td>19.5 to 21.7 steps per second, about 85 to 95 percent of that ceiling. three experiments in a row landed inside noise, so this is a plateau.</td></tr>
+<tr><th scope="row">ceiling, prefill and encoder</th><td>bound by gpu arithmetic. apple's matrix kernel measured 2.7 tflops here. a 2-minute prefill is about 5.9 tflop of work, so about 2.2 s at best, against 3.1 s now.</td></tr>
+<tr><th scope="row">what limits a wide batch</th><td>past about 12 rows the step is bound by gpu arithmetic, not memory. sharing weight reads is worth about 1.3x to 1.4x in total throughput on this mac, not the 12 to 20x the plan guessed.</td></tr>
+<tr><th scope="row">what the plan's goals got</th><td>same accuracy: met on the three golden clips, with at most 24 percent of the safety margin used. speed: 4.4x to 6.3x realtime, inside the plan's 4 to 6x estimate. throughput: 5.5x to 6.1x. latency: 0.28 s to first text on a short file. live first draft 0.7 to 1.1 s against a goal of about 0.5 s, not met.</td></tr>
+<tr><th scope="row">next lever 1</th><td>prefill attention through the matrix kernel instead of the bandwidth kernels. about 1 s of the long clip's 3.1 s prefill. cost: one more kernel path.</td></tr>
+<tr><th scope="row">next lever 2</th><td>live drafts re-encode and re-read the whole open phrase on every pass. caching finished encoder blocks and the audio part of the decoder cache would cut the first draft and the draft delay. cost: the mel floor rule from the plan, and a cache that survives across passes.</td></tr>
+<tr><th scope="row">next lever 3</th><td>log-softmax and top-k on the gpu, to drop the 1.8 mb logits readback per step. small.</td></tr>
+<tr><th scope="row">not measured</th><td>energy, an instruments trace of where work ran, the noise run through a real input, and behaviour once the fanless mac is hot for minutes. every run so far is in thermal state fair.</td></tr>
+<tr><th scope="row">not verified</th><td>the real microphone flow and its permission prompt, voice processing, a full first-run download of the 4 gb checkpoint, and voiceover in the app.</td></tr>
+</tbody></table></div>
+</section>
+<section aria-labelledby="tries"><h2 id="tries">tries</h2>
+<p class="dim">13 tries logged: 7 kept, 6 dropped. a dropped try is information too.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="every logged try"><table><thead><tr><th scope="col" class="num">date</th><th scope="col">bet</th><th scope="col">change</th><th scope="col">result</th><th scope="col">verdict</th><th scope="col">why</th></tr></thead><tbody>
+<tr><td class="num">2026-11-23</td><td>one-layer benchmark picks the decoder engine</td><td>raced a hand-written metal kernel on raw bf16 weights against mpsgraph in 32-bit and accelerate on the cpu, at decoder sizes</td><td>metal bf16 kernel: 37 ms per step for the 28 layers at 3 rows (79 gb/s). mpsgraph 32-bit: 53 gb/s at 3 rows but 2.5 tflops at 512 rows. cpu sgemm: about 7 steps per second.</td><td><span class="mark pass">kept</span></td><td>the bandwidth kernel wins the step, where memory is the limit. apple's kernel wins when many rows share a call.</td></tr>
+<tr><td class="num">2026-11-23</td><td>several rows per thread share a weight read</td><td>kernels that compute 3, 6, 12 or 24 rows in one thread</td><td>slower than one thread per value at every width: 12 rows took 71 ms against 47 ms.</td><td><span class="mark fail">dropped</span></td><td>neighbouring threads already share the weight row through the gpu's caches, and more running sums per thread cost more than they save.</td></tr>
+<tr><td class="num">2026-11-23</td><td>full 32-bit path first</td><td>encoder, prefill and step on the bandwidth kernel, 32-bit math and cache, batched beams with a slot ancestry table</td><td>golden test passed on the first complete run. long clip 2.4x realtime: encoder 5.0 s, prefill 14.3 s, 10.7 steps per second.</td><td><span class="mark pass">kept</span></td><td>correct first, so later speed work is separated from logic bugs.</td></tr>
+<tr><td class="num">2026-11-23</td><td>apple's matrix kernel for many-row multiplies</td><td>from 32 rows up, widen the bf16 weights to 32-bit on the fly and call MPSMatrixMultiplication. below that, keep the bandwidth kernel.</td><td>long clip encoder 5.0 s to 0.8 s, prefill 14.3 s to 3.0 s. tokens and candidates unchanged.</td><td><span class="mark pass">kept</span></td><td>2.7 tflops against about 0.4 for the bandwidth kernel at 1,600 rows. the 32-bit copy is transient, one matrix at a time.</td></tr>
+<tr><td class="num">2026-11-23</td><td>profile by leaving kernels out</td><td>skip one kernel class per run and compare step times</td><td>numbers made no sense: skipped kernels leave garbage that changes how long the others run.</td><td><span class="mark fail">dropped</span></td><td>replaced by a profile mode that gives each kernel its own command buffer and reads the gpu's clock.</td></tr>
+<tr><td class="num">2026-11-23</td><td>no single thread walks a whole row</td><td>rms norm, softmax and the value mix each looped in one thread. split them into runs of 64 that many threads add in a fixed order.</td><td>gpu time per step at a 1,700-token context: 166 ms to 70 ms. rms norm 21 ms to 1.4 ms, softmax 18 ms to 1.8 ms, mix 25 ms to 5 ms.</td><td><span class="mark pass">kept</span></td><td>serial loops are slow on a gpu. the fixed order keeps a row bit-identical at any batch width.</td></tr>
+<tr><td class="num">2026-11-23</td><td>two running sums in the bandwidth kernel</td><td>split the dot product into two accumulators</td><td>interleaved microbenchmark, best of 6: 3 rows 52.9 to 50.5 ms, 6 rows 85.1 to 73.8 ms, 12 rows 148.7 to 145.6 ms. four accumulators were no better.</td><td><span class="mark pass">kept</span></td><td>a shorter add chain. the gain is small because the step is near the memory limit.</td></tr>
+<tr><td class="num">2026-11-23</td><td>one thread per weight row for all batch rows</td><td>read each weight row once and loop over the batch inside the thread</td><td>2.7x slower at every width.</td><td><span class="mark fail">dropped</span></td><td>the long serial loop costs far more than the repeated reads it saves.</td></tr>
+<tr><td class="num">2026-11-23</td><td>encoder on the neural engine</td><td>a core ml model written from swift, one fixed 8-second window, 16-bit, all 612 operations planned on the neural engine</td><td>17 ms per window, 0.27 s for two minutes against 0.8 s on the gpu. same tokens and candidates on the short and medium clips, but it uses 44x and 35x the safety margin.</td><td><span class="mark fail">dropped</span></td><td>it fails the exactness bar, and the encoder is under 5% of the job. the code stays as an explicit pin outside the exactness claim.</td></tr>
+<tr><td class="num">2026-11-23</td><td>the first long clip was inside 32-bit noise</td><td>one comparison at step 76 had a gap of 0.00011. transformers' own 32-bit run was 0.90 of the margin away from its 64-bit run there, and the engine was closer to the 64-bit run than the reference was.</td><td>screened 12 cuts of the same recording for their smallest gap and took the widest, 35.0 to 151.5 s, gap 0.0032. clips are now rejected at half the margin instead of all of it.</td><td><span class="mark pass">kept</span></td><td>the plan rejects clips whose closest comparison sits inside 32-bit noise. the test was not loosened.</td></tr>
+<tr><td class="num">2026-11-23</td><td>threads that share a weight row sit side by side</td><td>swap the grid so the batch runs along a threadgroup and weight rows along the other axis</td><td>equal at 3 rows, 1.7x slower at 6, 12 and 24 rows.</td><td><span class="mark fail">dropped</span></td><td>the gpu already reuses the weight row across neighbouring dispatch rows, and the swapped layout breaks up the sequential read.</td></tr>
+<tr><td class="num">2026-11-23</td><td>a wider batch than 12 rows</td><td>12 medium clips at once with the batch allowed 12, 24 and 36 rows, interleaved twice</td><td>12 rows: 6.95x and 6.26x realtime. 24 rows: 6.09x and 4.10x. 36 rows: 5.65x and 5.59x.</td><td><span class="mark fail">dropped</span></td><td>past about 12 rows the step is bound by gpu arithmetic, not memory, so wider batches only add cache traffic. 12 stays the default.</td></tr>
+<tr><td class="num">2026-11-23</td><td>how much a wide batch buys</td><td>three long clips at once with the batch allowed 3, 6 and 9 rows</td><td>4.50x, 5.31x and 6.05x realtime, and 4.37x on the repeat at 3 rows. twelve medium clips: 6.0x at 3 rows, 7.7x at 6.</td><td><span class="mark pass">kept</span></td><td>sharing weight reads is worth about 1.3x to 1.4x on this mac. the plan's 12 to 20x estimate assumed memory was the only limit, and gpu arithmetic becomes the limit first.</td></tr>
+</tbody></table></div>
+</section>
+
+<footer>built from docs/performance.jsonl by scripts/performance.swift.</footer>
+</main>
+</body>
+</html>

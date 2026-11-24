@@ -13,3 +13,10 @@ xcuserdata/
 *.mlpackage/
 *.mlmodelc/
 *.gguf
+
+# the python reference environment
+reference/python/.venv/
+__pycache__/
+
+# large golden tensors live on a release, with their hashes in golden/manifest.json
+golden/tensors/

@@ -216,11 +216,13 @@ footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
 <nav class="top" aria-label="docs">
   <a href="plan.html">plan</a>
   <a href="architecture.html" aria-current="page">architecture</a>
+  <a href="api.html">api</a>
+  <a href="performance.html">performance</a>
 </nav>
 <main>
   <h1>how fourier packs compute</h1>
   <p class="lead">every step of inference, which chip runs it, and how the work is packed so nothing waits that doesn't have to.</p>
-  <p class="status">design only. nothing here is measured yet. the golden test picks the winners.</p>
+  <p class="status">the design, as planned. what was measured: the decoder and the encoder both run on the gpu, the neural engine encoder lost on exactness, and a wide batch is worth about 1.3x. see <a href="performance.html">the performance page</a>.</p>
   <div class="legend" aria-label="chip legend">
     <span><b class="n"></b>npu</span>
     <span><b class="g"></b>gpu</span>

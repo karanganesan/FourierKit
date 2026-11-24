@@ -48,3 +48,9 @@ these projects were read for ideas only. no code from them is copied here, and n
 - [fluidvoice](https://github.com/altic-dev/FluidVoice)
 - [apple: deploying transformers on the neural engine](https://machinelearning.apple.com/research/neural-engine-transformers)
 - [apple: on-device llama with core ml](https://machinelearning.apple.com/research/core-ml-on-device-llama)
+- [apple coremltools](https://github.com/apple/coremltools): its public format definitions were read to write the core ml model format from swift
+- the [inference-optimisation skill](https://github.com/sybil-solutions/inference-optimisation-skill), the source of the hill-climb method
+
+## golden clips
+
+the three clips in `golden/clips/` are cut from "the gettysburg address", read for librivox ([archive.org/details/gettysburg_johng_librivox](https://archive.org/details/gettysburg_johng_librivox)). the recording is in the public domain. the cut points are in `golden/manifest.json`.

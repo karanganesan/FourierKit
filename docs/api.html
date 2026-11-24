@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>fourier: api</title>
+<link rel="preconnect" href="https://cdn.karanganesan.com" crossorigin>
+<link rel="preload" href="https://cdn.karanganesan.com/1794861360796-04033bdf1852/fonts/allo/AlloVariable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="https://cdn.karanganesan.com/1794861360796-04033bdf1852/fonts/allo/allo.css">
+<style>
+:root {
+  color-scheme: dark;
+  --w8: rgb(255 255 255 / .08);
+  --w16: rgb(255 255 255 / .16);
+  --w24: rgb(255 255 255 / .24);
+  --w56: rgb(255 255 255 / .56);
+  --w64: rgb(255 255 255 / .64);
+  --npu: #fff;
+  --gpu: rgb(255 255 255 / .56);
+  --cpu: rgb(255 255 255 / .16);
+  --ease: cubic-bezier(.23, 1, .32, 1);
+  font-family: Allo, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-optical-sizing: auto;
+}
+* { box-sizing: border-box; }
+html { background: #000; -webkit-text-size-adjust: 100%; scroll-padding-top: 80px; }
+body {
+  margin: 0;
+  background: #000;
+  color: #fff;
+  font-size: 16px;
+  line-height: 24px;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+a { color: inherit; text-decoration: none; }
+@media (hover: hover) and (pointer: fine) { a:hover { text-decoration: underline; } }
+:focus-visible { outline: 2px solid rgb(255 255 255 / .48); outline-offset: 2px; }
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  gap: 8px;
+  padding: 16px max(24px, env(safe-area-inset-left));
+  background: rgb(0 0 0 / .8);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.top a {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  color: var(--w64);
+  font-size: 14px;
+}
+.top a[aria-current] { background: var(--w16); color: #fff; }
+main { width: min(100%, 1072px); margin: 0 auto; padding: 48px 24px 96px; }
+h1, h2, h3 { font-weight: 600; text-wrap: balance; margin: 0; }
+h1 { font-size: 48px; line-height: 56px; letter-spacing: -.032em; max-width: 800px; }
+h2 { font-size: 32px; line-height: 40px; letter-spacing: -.024em; margin-top: 96px; }
+h3 { font-size: 16px; line-height: 24px; }
+p, li { text-wrap: pretty; }
+p { margin: 16px 0 0; max-width: 720px; }
+.lead { font-size: 24px; line-height: 32px; letter-spacing: -.012em; color: var(--w64); margin-top: 24px; }
+.dim { color: var(--w64); }
+.small { font-size: 14px; line-height: 24px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+code { padding: 2px 4px; border-radius: 4px; background: var(--w8); }
+pre { margin: 24px 0 0; padding: 24px; overflow-x: auto; border-radius: 16px; background: var(--w8); line-height: 24px; }
+pre code { padding: 0; background: none; }
+.panel, pre, .table-wrap, .flow-group, .way, .tile i, .lane, .status { border-radius: 16px; }
+@supports (corner-shape: superellipse(1.74)) {
+  .panel, pre, .table-wrap, .flow-group, .way, .lane, .status { corner-shape: superellipse(1.74); border-radius: 24.46px; }
+  .tile i, code { corner-shape: superellipse(1.74); border-radius: 6.11px; }
+  .top a, button { corner-shape: round; }
+}
+.status { display: inline-block; margin-top: 24px; padding: 8px 16px; background: var(--w8); color: var(--w64); font-size: 14px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 32px; font-size: 14px; color: var(--w64); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend b { width: 16px; height: 16px; border-radius: 4px; }
+.n { background: var(--npu); } .g { background: var(--gpu); } .c { background: var(--cpu); }
+
+.flow { display: grid; grid-template-columns: 1fr 24px 1fr 24px 1.32fr 24px 1fr; align-items: stretch; gap: 8px; margin-top: 32px; }
+.flow-group { padding: 24px; background: var(--w8); }
+.flow-group h3 { margin-bottom: 8px; }
+.flow-group ol { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
+.flow-group li { display: flex; align-items: center; gap: 8px; }
+.flow-group li b { flex: none; display: inline-flex; gap: 2px; width: 32px; }
+.flow-group li b i { width: 8px; height: 8px; border-radius: 2px; }
+.flow-group .x { opacity: 0; }
+.arrow { align-self: center; justify-self: center; color: var(--w56); }
+.repeat { display: inline-flex; align-items: center; gap: 8px; color: var(--w64); font-size: 14px; }
+
+.table-wrap { margin-top: 24px; overflow-x: auto; background: var(--w8); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 24px; }
+th, td { padding: 12px 16px; text-align: left; vertical-align: top; }
+thead th { color: var(--w64); font-weight: 500; white-space: nowrap; }
+tbody tr:nth-child(odd) td, tbody tr:nth-child(odd) th { background: rgb(255 255 255 / .04); }
+.steps th[scope=row] { min-width: 288px; font-weight: 400; }
+.steps .num { display: inline-block; width: 24px; color: var(--w56); font-variant-numeric: tabular-nums; }
+.steps strong { font-weight: 600; }
+.steps small { display: block; margin: 4px 0 0 24px; color: var(--w64); font-size: 14px; line-height: 24px; }
+.group-row th { background: var(--w16) !important; font-weight: 600; }
+.chipcell { width: 88px; text-align: center; vertical-align: middle; }
+.mark { display: inline-flex; align-items: center; justify-content: center; min-width: 64px; height: 24px; padding: 0 8px; border-radius: 999px; font-size: 12px; line-height: 16px; }
+.race-n { background: var(--npu); color: #000; }
+.race-g { background: var(--gpu); color: #000; }
+.run-c { background: var(--w24); color: #fff; }
+.back { color: var(--w56); }
+.none { color: var(--w24); }
+
+.switch { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+button {
+  height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--w8);
+  color: var(--w64);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 120ms var(--ease), background-color 120ms var(--ease), color 120ms var(--ease);
+}
+button:active { transform: scale(.97); }
+button[aria-pressed=true] { background: #fff; color: #000; }
+@media (hover: hover) and (pointer: fine) { button[aria-pressed=false]:hover { background: var(--w16); color: #fff; } }
+.note { min-height: 48px; margin-top: 16px; color: var(--w64); }
+.packer { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; margin-top: 16px; }
+.lanes { position: relative; height: 384px; }
+.lane-labels { position: relative; height: 384px; font-size: 14px; color: var(--w64); }
+.lane-labels span { position: absolute; left: 0; display: flex; align-items: center; }
+.lane { position: absolute; left: 0; right: 0; background: var(--w8); }
+.free { display: flex; align-items: center; justify-content: center; color: var(--w56); font-size: 12px; }
+.tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(100% / 12);
+  height: 24px;
+  padding: 2px;
+  transition: transform 320ms var(--ease), opacity 160ms var(--ease);
+  will-change: transform;
+}
+.tile i {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  transition: background-color 160ms var(--ease), color 160ms var(--ease);
+}
+.tile.hidden { opacity: 0; }
+.stat { margin-bottom: 8px; font-size: 32px; line-height: 40px; font-weight: 600; letter-spacing: -.024em; font-variant-numeric: tabular-nums; }
+.tile.on-n i { background: var(--npu); color: #000; }
+.tile.on-g i { background: var(--gpu); color: #000; }
+.tile.on-c i { background: var(--w24); color: #fff; }
+
+.ways { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 24px; }
+.way { padding: 24px; background: var(--w8); }
+.way p { margin-top: 8px; font-size: 14px; color: var(--w64); }
+.mini { display: grid; gap: 2px; margin-bottom: 16px; height: 64px; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(3, 1fr); }
+.mini i { border-radius: 2px; background: rgb(255 255 255 / .04); }
+.mini .n { background: var(--npu); } .mini .g { background: var(--gpu); } .mini .c { background: var(--w24); }
+
+.bars { display: grid; gap: 16px; margin-top: 24px; padding: 24px; background: var(--w8); }
+.bar-row { display: grid; grid-template-columns: 192px minmax(0, 1fr) 128px; align-items: center; gap: 16px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.bar { height: 24px; border-radius: 4px; background: var(--gpu); transform-origin: left; }
+.bar-row span:last-child { text-align: right; color: var(--w64); }
+
+ol.rules { margin: 24px 0 0; padding-left: 24px; max-width: 720px; }
+ol.rules li + li { margin-top: 8px; }
+footer { margin-top: 96px; color: var(--w56); font-size: 14px; }
+
+/* plan page */
+.prose h2 { scroll-margin-top: 80px; }
+.prose ul, .prose ol { margin: 16px 0 0; padding-left: 24px; max-width: 720px; }
+.prose li + li { margin-top: 8px; }
+.prose li > ul, .prose li > ol { margin-top: 8px; }
+.prose strong { font-weight: 600; }
+.prose table code { white-space: nowrap; }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 32px; font-size: 14px; }
+.toc a { display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border-radius: 999px; background: var(--w8); color: var(--w64); }
+
+@media (max-width: 880px) {
+  h1 { font-size: 32px; line-height: 40px; }
+  h2 { font-size: 24px; line-height: 32px; margin-top: 64px; }
+  .lead { font-size: 16px; line-height: 24px; }
+  main { padding-top: 24px; }
+  .flow { grid-template-columns: 1fr; }
+  .arrow { transform: rotate(90deg); }
+  .ways { grid-template-columns: 1fr; }
+  .packer { grid-template-columns: 40px minmax(0, 1fr); }
+  .tile i { font-size: 8px; }
+  .bar-row { grid-template-columns: 120px minmax(0, 1fr) 72px; gap: 8px; }
+  .steps th[scope=row] { min-width: 224px; }
+  button { height: 48px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile { transition: opacity 160ms ease; }
+  button { transition: none; }
+  button:active { transform: none; }
+}
+
+/* api and performance pages */
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+thead th.num { text-align: right; }
+td.mono, th.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+.mark.pass { background: #fff; color: #000; }
+.mark.fail { background: var(--w24); color: #fff; }
+.chart { margin-top: 24px; padding: 24px; background: var(--w8); border-radius: 16px; }
+@supports (corner-shape: superellipse(1.74)) { .chart { corner-shape: superellipse(1.74); border-radius: 24.46px; } }
+.chart { overflow-x: auto; }
+.chart svg { display: block; width: 100%; min-width: 640px; height: auto; }
+.chart text { fill: rgb(255 255 255 / .64); font-family: inherit; font-size: 12px; font-variant-numeric: tabular-nums; }
+.chart .grid { stroke: rgb(255 255 255 / .08); stroke-width: 1; }
+.chart .s1 { stroke: #fff; fill: none; stroke-width: 2; }
+.chart .s2 { stroke: rgb(255 255 255 / .56); fill: none; stroke-width: 2; stroke-dasharray: 2 6; stroke-linecap: round; }
+.chart .p1 { stroke: #fff; stroke-width: 2; }
+.chart .p2 { stroke: rgb(255 255 255 / .56); stroke-width: 2; }
+.chart .full { fill: #fff; }
+.chart .full.p2 { fill: rgb(255 255 255 / .56); }
+.chart .hollow { fill: #000; }
+.sw { display: inline-block; width: 16px; height: 2px; vertical-align: middle; background: #fff; }
+.sw.dots { background: none; border-top: 2px dotted rgb(255 255 255 / .56); height: 0; }
+.api-toc { margin-top: 32px; }
+.sig { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+td .sig, th .sig { white-space: nowrap; }
+@media (max-width: 880px) { .chart { padding: 16px; } }
+</style>
+</head>
+<body>
+<nav class="top" aria-label="docs">
+  <a href="plan.html">plan</a>
+  <a href="architecture.html">architecture</a>
+  <a href="api.html" aria-current="page">api</a>
+  <a href="performance.html">performance</a>
+</nav>
+<main class="prose">
+<h1>the fourierkit api</h1>
+<p class="lead">three modes, every option public, one line to start. <code>import FourierKit</code>, and call <code>Fourier()</code>.</p>
+<p class="status">the engine, the sdk and the default ui exist. the golden test checks the engine directly and these calls for a file, a recording and live replay.</p>
+<nav class="toc" aria-label="on this page"><a href="#start">start here</a><a href="#transcribe">transcribe</a><a href="#record">record</a><a href="#listen">listen</a><a href="#prepare-progress">prepare progress</a><a href="#state">state and metrics</a><a href="#microphone">microphone</a><a href="#options">options</a><a href="#parts">replaceable parts</a><a href="#errors">errors</a><a href="#ui">default ui</a><a href="#exactness">exactness</a></nav>
+<section aria-labelledby="start">
+<h2 id="start">start here</h2>
+<p class="dim">one line gives the best result. every option has a default, and every default is the exact path.</p>
+<pre><code>import FourierKit
+
+let speech = Fourier()
+try await speech.prepare()                              // optional: every mode prepares on first use
+
+let transcript = try await speech.transcribe(contentsOf: url)
+print(transcript.text)</code></pre>
+<p class="dim"><code>Fourier</code> is a final class and is <code>Sendable</code>. it is safe to call from the main actor: every heavy call is async and leaves the caller's actor at once, and streams are produced off the main actor and coalesced to at most one value per frame. there is one engine per process, so every <code>Fourier</code> instance shares the same weights.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>init(_ options: FourierOptions = FourierOptions())</code></th><td>the default is the recommended setup. see the options reference.</td></tr>
+<tr><th scope="row" class="mono"><code>let options: FourierOptions</code></th><td>what this instance was made with. it cannot change after init.</td></tr>
+<tr><th scope="row" class="mono"><code>func prepare() async throws</code></th><td>downloads, verifies, loads and warms the model. optional. calling it again joins the same run, and the work stops only when the last waiting caller cancels. a model that is already ready finishes at once.</td></tr>
+<tr><th scope="row" class="mono"><code>var prepareProgress: AsyncStream&lt;PrepareProgress&gt;</code></th><td>one smooth value from 0 to 1 for the current or next prepare run. see prepare progress.</td></tr>
+<tr><th scope="row" class="mono"><code>func warm() async throws</code></th><td>applies the keep-warm option, then does the same as prepare().</td></tr>
+<tr><th scope="row" class="mono"><code>func cool() async</code></th><td>lets go of the model's memory if nothing is running. the next use warms it again.</td></tr>
+</tbody></table></div>
+</section>
+<section aria-labelledby="transcribe">
+<h2 id="transcribe">transcribe</h2>
+<p class="dim">audio up to 120 s runs in one pass and is never split, so it matches the reference path. longer audio is cut at quiet points by one deterministic splitter, each piece runs the exact path and the pieces are joined with single spaces. if a piece reaches the token limit without a stop token, it is split and decoded again, so text is never silently cut off. file decoding and resampling to 16 khz happen inside the kit. files and recordings are never cleaned.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="transcribe signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>func transcribe(contentsOf url: URL) async throws -&gt; Transcript</code></th><td>any file core audio can open</td></tr>
+<tr><th scope="row" class="mono"><code>func transcribe(_ recording: Recording) async throws -&gt; Transcript</code></th><td>the result of record()</td></tr>
+<tr><th scope="row" class="mono"><code>func transcribe(samples: [Float], sampleRate: Double = 16_000) async throws -&gt; Transcript</code></th><td>mono samples at any rate, resampled to 16 khz if needed</td></tr>
+<tr><th scope="row" class="mono"><code>func transcriptionJob(contentsOf url: URL) -&gt; TranscriptionJob</code></th><td>starts the same work and returns a handle with its own progress, result and cancel</td></tr>
+<tr><th scope="row" class="mono"><code>func transcriptionJob(_ recording: Recording) -&gt; TranscriptionJob</code></th><td>the same, for a recording</td></tr>
+<tr><th scope="row" class="mono"><code>func transcriptionJob(samples: [Float], sampleRate: Double = 16_000) -&gt; TranscriptionJob</code></th><td>the same, for samples</td></tr>
+</tbody></table></div>
+<p class="dim">cancelling the task that is awaiting one of the transcribe calls cancels the work. a job handle is different: cancelling a task that awaits <code>job.result</code> does not cancel the job. only <code>job.cancel()</code> does.</p>
+<pre><code>let samples: [Float] = []   // your own 16 khz mono audio
+let text = try await speech.transcribe(samples: samples).text
+let other = try await speech.transcribe(samples: samples, sampleRate: 48_000).text</code></pre>
+<h3 style="margin-top:32px">the job handle</h3>
+<pre><code>let job = speech.transcriptionJob(contentsOf: url)
+let watching = Task {
+    for await fraction in job.progress { print(fraction) }   // 0...1, ends with the job
+}
+// job.cancel() stops at the next piece boundary, and result then throws FourierError.cancelled
+let transcript = try await job.result
+await watching.value</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="transcription job members"><table><thead><tr><th scope="col">member</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>let id: UUID</code></th><td>the same id the job has in <code>FourierState.jobs</code></td></tr>
+<tr><th scope="row" class="mono"><code>var progress: AsyncStream&lt;Double&gt;</code></th><td>fraction of the audio done, 0 to 1, newest value only. ends when the job ends.</td></tr>
+<tr><th scope="row" class="mono"><code>var fraction: Double</code></th><td>the latest fraction done</td></tr>
+<tr><th scope="row" class="mono"><code>var result: Transcript { get async throws }</code></th><td>waits for the transcript. errors are <code>FourierError</code> values.</td></tr>
+<tr><th scope="row" class="mono"><code>func cancel()</code></th><td>stops at the next piece boundary</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px">the result</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="transcript"><table><thead><tr><th scope="col">type and member</th><th scope="col">what it holds</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>Transcript.text: String</code></th><td>the model's exact text, pieces joined with single spaces</td></tr>
+<tr><th scope="row" class="mono"><code>Transcript.language: String</code></th><td>the language the model was asked for, as a resolved name such as english</td></tr>
+<tr><th scope="row" class="mono"><code>Transcript.pieces: [TranscriptPiece]</code></th><td>pieces or phrases in order, each with its audio range</td></tr>
+<tr><th scope="row" class="mono"><code>Transcript.duration: Duration</code></th><td>length of the audio</td></tr>
+<tr><th scope="row" class="mono"><code>Transcript.metrics: TranscriptMetrics</code></th><td>see below</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptPiece.text: String</code></th><td>the piece's text</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptPiece.start, end: Duration</code></th><td>the audio range of the piece</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptPiece.samples: Range&lt;Int&gt;</code></th><td>the same range as 16 khz sample indices</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptPiece.reachedStop: Bool</code></th><td>false if the piece hit the token limit and could not be split further</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.realtimeSpeed: Double</code></th><td>audio seconds per wall second, from the call to the result</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.timeToFirstText: Duration?</code></th><td>from the call to the first decoded token</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.elapsed: Duration</code></th><td>wall time</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.tokens: Int, decoderSteps: Int</code></th><td>tokens generated without the prompt, and decoder steps</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.placement: [Stage: Chip]</code></th><td>the planned chip for each stage</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.precision: [Stage: Precision]</code></th><td>the precision for each stage</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.widestBatch: Int</code></th><td>the widest decoder batch used</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.tokenLimitSplits: Int</code></th><td>pieces decoded again after hitting the token limit</td></tr>
+<tr><th scope="row" class="mono"><code>TranscriptMetrics.melTime, encodeTime, prefillTime, decodeTime: Duration</code></th><td>time in each stage, summed over pieces</td></tr>
+</tbody></table></div>
+</section>
+<section aria-labelledby="record">
+<h2 id="record">record</h2>
+<p class="dim">raw capture with a live level, then the same path as transcribe. recorded audio is not cleaned: no noise suppression, no echo cancellation and no gain, so it can match the reference. the first call asks for the microphone as <code>options.permissions</code> allows. the engine warms while you record, so the transcript can start at once. a warm-up never starts a download.</p>
+<pre><code>let recorder = try await speech.record()
+let meter = Task {
+    for await level in recorder.levels { print(level) }   // 0 (silence) to 1 (full scale)
+}
+// ... later
+let recording = await recorder.stop()
+await meter.value
+let transcript = try await speech.transcribe(recording)</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="record signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>func record() async throws -&gt; Recorder</code></th><td>starts capture from <code>options.audioSource</code>, the system microphone by default</td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.id: UUID</code></th><td>the job id in <code>FourierState.jobs</code></td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.levels: AsyncStream&lt;Float&gt;</code></th><td>input loudness for a meter, 0 to 1, newest value only. ends when recording stops.</td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.level: Float</code></th><td>the newest level</td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.duration: Duration</code></th><td>audio captured so far</td></tr>
+<tr><th scope="row" class="mono"><code>Recorder.startedAt: Date</code></th><td>when capture began</td></tr>
+<tr><th scope="row" class="mono"><code>func stop() async -&gt; Recording</code></th><td>stops capture and returns everything recorded. calling it again returns the same recording.</td></tr>
+<tr><th scope="row" class="mono"><code>func cancel() async</code></th><td>stops capture and throws the audio away</td></tr>
+<tr><th scope="row" class="mono"><code>Recording.samples: [Float]</code></th><td>16 khz mono audio, untouched</td></tr>
+<tr><th scope="row" class="mono"><code>Recording.duration: Duration</code></th><td>length of the audio</td></tr>
+<tr><th scope="row" class="mono"><code>Recording.droppedSamples: Int</code></th><td>samples lost because the reader fell behind, normally 0</td></tr>
+<tr><th scope="row" class="mono"><code>Recording.startedAt: Date</code></th><td>when capture began</td></tr>
+<tr><th scope="row" class="mono"><code>Recording.sampleRate: Double</code></th><td>static, 16000</td></tr>
+<tr><th scope="row" class="mono"><code>Recording.init(samples:startedAt:droppedSamples:)</code></th><td>make your own, with <code>startedAt</code> defaulting to now and <code>droppedSamples</code> to 0</td></tr>
+</tbody></table></div>
+</section>
+<section aria-labelledby="listen">
+<h2 id="listen">listen</h2>
+<p class="dim">live text while you speak. the model is not a streaming model, so live text is built on top of it: finished audio blocks are encoded once and cached, only the newest audio is encoded on each short step, and text that agrees across passes settles. a pause ends a phrase, settles all of it and resets the window, so the cost stays flat in a long session. the first call asks for the microphone and prepares the model if needed.</p>
+<pre><code>let live = try await speech.listen()
+
+let reading = Task {
+    for try await event in live.events {
+        switch event {
+        case .started:                    break   // the input is live
+        case .level(let level):           print(level)                // for a meter
+        case .speechStarted:              break   // voice detected
+        case .update(let update):         print(update.settled, update.draft)
+        case .phraseEnded(let phrase):    print(phrase.text)
+        case .warning(let warning):       print(warning)
+        }
+    }
+}
+
+// when the user stops: stop the input, get the final text, end the stream
+let transcript = try await live.finish()
+try await reading.value
+
+// or, instead of finish(): stop, discard and end the stream
+// live.cancel()</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="listen signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>func listen() async throws -&gt; LiveSession</code></th><td>starts with <code>options.listen</code></td></tr>
+<tr><th scope="row" class="mono"><code>func listen(_ listenOptions: ListenOptions) async throws -&gt; LiveSession</code></th><td>starts with options for this session only. it throws <code>FourierError.invalidOptions</code> if <code>settleAfter</code> is under 1.</td></tr>
+<tr><th scope="row" class="mono"><code>LiveSession.id: UUID</code></th><td>the job id in <code>FourierState.jobs</code></td></tr>
+<tr><th scope="row" class="mono"><code>LiveSession.events: LiveEvents</code></th><td>an <code>AsyncSequence</code> of <code>LiveEvent</code> that can throw. one reader at a time.</td></tr>
+<tr><th scope="row" class="mono"><code>func finish() async throws -&gt; Transcript</code></th><td>stops the input, waits for the last phrase's exact pass, ends the event stream and returns the final text. calling it again returns the same transcript.</td></tr>
+<tr><th scope="row" class="mono"><code>func cancel()</code></th><td>stops the input, discards everything and ends the event stream</td></tr>
+<tr><th scope="row" class="mono"><code>var latestUpdate: LiveUpdate? { get async }</code></th><td>the newest update, nil before any text</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px">promises the api makes</h3>
+<ul class="prose" style="margin:16px 0 0;padding-left:24px;max-width:720px"><li><strong>settled text never changes.</strong> it only grows.</li><li><strong>draft text can change or vanish</strong> on any update. it is always the newest guess for the audio after the settled part.</li><li><strong>drafts are optional.</strong> with drafts off, or when nothing is uncertain, the draft is empty and only settled text arrives.</li><li><strong>settled plus draft</strong> is always the best full text so far.</li><li><strong>the transcript from finish() comes from the exact passes.</strong> its wording can differ from the live text, and it is the one to save.</li><li><strong>levels and updates keep only the newest.</strong> a slow reader gets the newest value, and memory stays bounded. the other events queue in order.</li><li><strong>cancelling the task that reads events does not stop the session.</strong> only <code>finish()</code> or <code>cancel()</code> does.</li><li><strong>if the mac falls behind, updates slow down before any audio is dropped,</strong> and a warning says so.</li></ul>
+<h3 style="margin-top:32px">events</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="live events"><table><thead><tr><th scope="col">case</th><th scope="col">meaning</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>started</code></th><td>the input is live</td></tr>
+<tr><th scope="row" class="mono"><code>level(Float)</code></th><td>input loudness for a meter, 0 (-60 dbfs or quieter) to 1 (full scale). newest value only.</td></tr>
+<tr><th scope="row" class="mono"><code>speechStarted</code></th><td>voice detected</td></tr>
+<tr><th scope="row" class="mono"><code>update(LiveUpdate)</code></th><td>new settled and draft text, as a full snapshot</td></tr>
+<tr><th scope="row" class="mono"><code>phraseEnded(LivePhrase)</code></th><td>a pause or the length limit closed a phrase</td></tr>
+<tr><th scope="row" class="mono"><code>warning(LiveWarning)</code></th><td>fell behind, input changed, and the like</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px"><code>LiveUpdate</code> and <code>LivePhrase</code></h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="live update"><table><thead><tr><th scope="col">member</th><th scope="col">what it holds</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>LiveUpdate.settled: String</code></th><td>never changes, only grows</td></tr>
+<tr><th scope="row" class="mono"><code>LiveUpdate.draft: String</code></th><td>may change, may be empty</td></tr>
+<tr><th scope="row" class="mono"><code>LiveUpdate.text: String</code></th><td>settled plus draft</td></tr>
+<tr><th scope="row" class="mono"><code>LiveUpdate.newlySettled: String</code></th><td>added to <code>settled</code> since the last update this reader got</td></tr>
+<tr><th scope="row" class="mono"><code>LiveUpdate.phrases: [LivePhrase]</code></th><td>the phrases so far</td></tr>
+<tr><th scope="row" class="mono"><code>LiveUpdate.audioTime: Duration</code></th><td>how much audio has been heard</td></tr>
+<tr><th scope="row" class="mono"><code>LiveUpdate.delay: Duration</code></th><td>how far the text is behind the voice</td></tr>
+<tr><th scope="row" class="mono"><code>LivePhrase.id: Int</code></th><td>the phrase number</td></tr>
+<tr><th scope="row" class="mono"><code>LivePhrase.settled: String</code></th><td>never changes, only grows</td></tr>
+<tr><th scope="row" class="mono"><code>LivePhrase.draft: String</code></th><td>empty once the phrase is closed</td></tr>
+<tr><th scope="row" class="mono"><code>LivePhrase.text: String</code></th><td>settled plus draft</td></tr>
+<tr><th scope="row" class="mono"><code>LivePhrase.start, end: Duration</code></th><td>the phrase's audio range</td></tr>
+<tr><th scope="row" class="mono"><code>LivePhrase.isClosed: Bool</code></th><td>a pause or the length limit closed it, and all of it is settled</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px">warnings</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="live warnings"><table><thead><tr><th scope="col">case</th><th scope="col">meaning</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>fellBehind(updateInterval: Duration)</code></th><td>passes took longer than the update interval, so updates slowed down. no audio was dropped.</td></tr>
+<tr><th scope="row" class="mono"><code>audioDropped(Duration)</code></th><td>audio was lost, for example while the input was rebuilt</td></tr>
+<tr><th scope="row" class="mono"><code>inputChanged(audioMayBeLost: Bool)</code></th><td>the input route changed and capture was rebuilt</td></tr>
+<tr><th scope="row" class="mono"><code>inputDeviceUnavailable(String)</code></th><td>the chosen input is gone, so capture follows the system default</td></tr>
+<tr><th scope="row" class="mono"><code>voiceProcessingUnavailable(String)</code></th><td>voice processing could not start, so the audio is not cleaned</td></tr>
+<tr><th scope="row" class="mono"><code>inputInterrupted</code></th><td>capture stopped for a moment</td></tr>
+<tr><th scope="row" class="mono"><code>inputEnded</code></th><td>the audio source has no more audio</td></tr>
+<tr><th scope="row" class="mono"><code>phraseTooLong</code></th><td>a phrase hit the length limit and was settled early</td></tr>
+</tbody></table></div>
+<p class="dim"><code>LiveWarning</code> is <code>CustomStringConvertible</code>, so <code>print(warning)</code> gives a sentence that is ready to show.</p>
+<h3 style="margin-top:32px">options for one session</h3>
+<pre><code>var listenOptions = ListenOptions()
+listenOptions.drafts = false                       // settled text only
+listenOptions.pauseToEndPhrase = .milliseconds(800)
+listenOptions.finalPass = .fullAudio
+let live = try await speech.listen(listenOptions)</code></pre>
+<p class="dim">every <code>ListenOptions</code> field and its default is in the options reference. to try listen without a microphone, play a file in as if spoken:</p>
+<pre><code>var listenOptions = ListenOptions()
+listenOptions.audioSource = FileAudioSource(url: url, realtime: true)
+let live = try await speech.listen(listenOptions)   // no microphone, no permission prompt</code></pre>
+<p class="dim">the final transcript is one exact pass per phrase, started as soon as the phrase closes, so <code>finish()</code> only waits for the last phrase. with <code>finalPass = .fullAudio</code> it is one pass over everything heard, which is slower to finish.</p>
+</section>
+<section aria-labelledby="prepare-progress">
+<h2 id="prepare-progress">prepare progress</h2>
+<p class="dim">one value from 0 to 1 that covers everything from download to warm-up. any number of observers can read it, and calling <code>prepare()</code> twice joins the same work.</p>
+<pre><code>let preparing = Task { try await speech.prepare() }
+
+for await progress in speech.prepareProgress {
+    print(progress.stage.name)          // "downloading"
+    print(progress.fraction)            // 0.0 to 1.0, never goes backward
+    print(progress.bytesDone, progress.bytesTotal)   // during download
+    print(progress.timeRemaining as Any)             // nil until it can be estimated
+}
+
+try await preparing.value</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="prepare progress"><table><thead><tr><th scope="col">member</th><th scope="col">what it holds</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>fraction: Double</code></th><td>0 to 1. never goes backward. 1 only once warm-up succeeded.</td></tr>
+<tr><th scope="row" class="mono"><code>stage: PrepareProgress.Stage</code></th><td>the current stage</td></tr>
+<tr><th scope="row" class="mono"><code>bytesDone: Int64, bytesTotal: Int64</code></th><td>bytes during download</td></tr>
+<tr><th scope="row" class="mono"><code>timeRemaining: Duration?</code></th><td>nil until it can be estimated</td></tr>
+</tbody></table></div>
+<div class="table-wrap" tabindex="0" role="region" aria-label="prepare stages"><table><thead><tr><th scope="col">stage</th><th scope="col">name</th><th scope="col">share of the bar</th><th scope="col">where progress comes from</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>check</code></th><td>checking files</td><td>1%</td><td>files checked</td></tr>
+<tr><th scope="row" class="mono"><code>download</code></th><td>downloading</td><td>60%</td><td>real bytes</td></tr>
+<tr><th scope="row" class="mono"><code>verify</code></th><td>verifying</td><td>5%</td><td>real bytes hashed</td></tr>
+<tr><th scope="row" class="mono"><code>convert</code></th><td>converting</td><td>20%</td><td>tensors written</td></tr>
+<tr><th scope="row" class="mono"><code>compile</code></th><td>compiling</td><td>8%</td><td>finished models, estimated in between</td></tr>
+<tr><th scope="row" class="mono"><code>load</code></th><td>loading</td><td>3%</td><td>finished models</td></tr>
+<tr><th scope="row" class="mono"><code>warmUp</code></th><td>warming up</td><td>3%</td><td>finished warm-up runs</td></tr>
+<tr><th scope="row" class="mono"><code>ready</code></th><td>ready</td><td>0%</td><td>the end</td></tr>
+</tbody></table></div>
+<p class="dim">the shares are starting values from the plan, to be replaced by times measured on this mac. the stream is the current or next prepare run and ends when the run ends. a ready model gives 1 at once. a download resumes from its last written byte, a failed final hash downloads the file again, and cancel keeps partial files.</p>
+</section>
+<section aria-labelledby="state">
+<h2 id="state">state and metrics</h2>
+<p class="dim">one source of truth. an app can draw its whole interface from the state. updates are coalesced to one per frame and produced off the main actor.</p>
+<pre><code>let state = await speech.state                  // latest snapshot
+for await state in speech.states {              // every change, newest value only
+    print(state.engine, state.jobs.count, state.pressure)
+}
+
+for await metrics in speech.metrics {           // about four times a second, only while read
+    print(metrics.realtimeSpeed, metrics.batchWidth)
+}</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="state signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>var state: FourierState { get async }</code></th><td>the latest snapshot</td></tr>
+<tr><th scope="row" class="mono"><code>var states: AsyncStream&lt;FourierState&gt;</code></th><td>every change, coalesced to one per frame</td></tr>
+<tr><th scope="row" class="mono"><code>var metrics: AsyncStream&lt;FourierMetrics&gt;</code></th><td>live numbers about four times a second, collected only while something reads them</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px"><code>FourierState</code></h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="fourier state"><table><thead><tr><th scope="col">member</th><th scope="col">what it holds</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>engine: EngineState</code></th><td>cold, preparing, loading, warm, busy, cooling or failed</td></tr>
+<tr><th scope="row" class="mono"><code>prepare: PrepareProgress?</code></th><td>nil when not preparing</td></tr>
+<tr><th scope="row" class="mono"><code>jobs: [JobState]</code></th><td>each running listen, record and transcribe</td></tr>
+<tr><th scope="row" class="mono"><code>microphone: MicrophoneState</code></th><td>permission, capture and devices</td></tr>
+<tr><th scope="row" class="mono"><code>speech: SpeechActivity</code></th><td>silent or speaking</td></tr>
+<tr><th scope="row" class="mono"><code>pressure: SystemPressure</code></th><td>normal, busy (memory is tight), hot or lowPower</td></tr>
+<tr><th scope="row" class="mono"><code>placement: [Stage: Chip]</code></th><td>the planned chip for each stage</td></tr>
+<tr><th scope="row" class="mono"><code>precision: [Stage: Precision]</code></th><td>the precision for each stage</td></tr>
+<tr><th scope="row" class="mono"><code>error: FourierError?</code></th><td>the last error that stopped prepare or a job, cleared by the next success</td></tr>
+<tr><th scope="row" class="mono"><code>JobState.id, kind, phase</code></th><td><code>kind</code> is transcribe, record or listen. <code>phase</code> is preparing, reading, capturing, running or finishing.</td></tr>
+<tr><th scope="row" class="mono"><code>JobState.progress: Double?</code></th><td>0 to 1 when it can be known, nil for open-ended work such as listening</td></tr>
+<tr><th scope="row" class="mono"><code>JobState.audioDuration: Duration</code></th><td>audio heard or read so far</td></tr>
+<tr><th scope="row" class="mono"><code>JobState.startedAt: Date</code></th><td>when the job began</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px"><code>FourierMetrics</code></h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="fourier metrics"><table><thead><tr><th scope="col">member</th><th scope="col">what it holds</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>realtimeSpeed: Double</code></th><td>seconds of audio finished per second of wall time, over the last few seconds</td></tr>
+<tr><th scope="row" class="mono"><code>tokensPerSecond: Double</code></th><td>tokens per second</td></tr>
+<tr><th scope="row" class="mono"><code>decoderStepsPerSecond: Double</code></th><td>decoder steps per second</td></tr>
+<tr><th scope="row" class="mono"><code>timeToFirstText: Duration?</code></th><td>from the call to the first text</td></tr>
+<tr><th scope="row" class="mono"><code>draftDelay: Duration?</code></th><td>how far live draft text is behind the voice</td></tr>
+<tr><th scope="row" class="mono"><code>settleDelay: Duration?</code></th><td>how long live text takes to settle</td></tr>
+<tr><th scope="row" class="mono"><code>workload: Workload</code></th><td>idle, short, medium, long, veryLong, manyFiles, realtime, realtimePlusFiles or underLoad</td></tr>
+<tr><th scope="row" class="mono"><code>batchWidth: Int</code></th><td>decoder rows in the current step</td></tr>
+<tr><th scope="row" class="mono"><code>maxBatchWidth: Int</code></th><td>the widest batch allowed right now</td></tr>
+<tr><th scope="row" class="mono"><code>queuedPieces: Int, activePieces: Int</code></th><td>pieces waiting and pieces running</td></tr>
+<tr><th scope="row" class="mono"><code>chipBusy: [Chip: Double]</code></th><td>share of recent time each chip spent on engine calls, 0 to 1. from the engine's own call timing, because macos has no public live npu usage api.</td></tr>
+<tr><th scope="row" class="mono"><code>appMemory: UInt64</code></th><td>the app's physical footprint</td></tr>
+<tr><th scope="row" class="mono"><code>weightMemory: UInt64</code></th><td>memory held by the weights</td></tr>
+<tr><th scope="row" class="mono"><code>cacheMemory: UInt64</code></th><td>decoder key-value cache in use</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px">compute vocabulary</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="stage chip precision"><table><thead><tr><th scope="col">type</th><th scope="col">cases</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>Stage</code></th><td>mel, encoder, decoder, search</td></tr>
+<tr><th scope="row" class="mono"><code>Chip</code></th><td>cpu, gpu, npu</td></tr>
+<tr><th scope="row" class="mono"><code>Precision</code></th><td>automatic, float32, float16, bfloat16 (bf16 weights read as stored, with 32-bit accumulation)</td></tr>
+</tbody></table></div>
+</section>
+<section aria-labelledby="microphone">
+<h2 id="microphone">microphone and permissions</h2>
+<p class="dim">the microphone is asked for only when needed. the first <code>listen()</code> or <code>record()</code> requests it, never app launch, and file transcription never asks. reading state never prompts. only <code>requestMicrophone()</code>, <code>listen()</code> or <code>record()</code> can show the system dialog.</p>
+<pre><code>let mic = await speech.microphone                       // latest snapshot, never prompts
+for await mic in speech.microphoneStates {              // permission, capture and device changes
+    print(mic.permission, mic.capture, mic.device?.name ?? "no input")
+}
+for await level in speech.microphoneLevels { }          // meter, newest value
+
+let permission = await speech.requestMicrophone()       // asks only if never asked
+if permission == .denied { speech.openMicrophoneSettings() }</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="microphone signatures"><table><thead><tr><th scope="col">signature</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>var microphone: MicrophoneState { get async }</code></th><td>the latest snapshot</td></tr>
+<tr><th scope="row" class="mono"><code>var microphoneStates: AsyncStream&lt;MicrophoneState&gt;</code></th><td>updates as permission, capture and devices change</td></tr>
+<tr><th scope="row" class="mono"><code>var microphoneLevels: AsyncStream&lt;Float&gt;</code></th><td>input level while record() or listen() runs, 0 to 1, newest value only</td></tr>
+<tr><th scope="row" class="mono"><code>func requestMicrophone() async -&gt; MicrophoneState.Permission</code></th><td>shows the system prompt only if the user was never asked, and returns the permission</td></tr>
+<tr><th scope="row" class="mono"><code>func openMicrophoneSettings() -&gt; Bool</code></th><td>opens privacy and security, microphone, in system settings. returns whether it opened. the result can be ignored.</td></tr>
+</tbody></table></div>
+<div class="table-wrap" tabindex="0" role="region" aria-label="microphone state"><table><thead><tr><th scope="col">member</th><th scope="col">what it holds</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>permission: Permission</code></th><td>notDetermined, granted, denied or restricted</td></tr>
+<tr><th scope="row" class="mono"><code>capture: Capture</code></th><td>off, starting, on, interrupted or failed(FourierError)</td></tr>
+<tr><th scope="row" class="mono"><code>device: InputDevice?</code></th><td>the current input, nil if there is none</td></tr>
+<tr><th scope="row" class="mono"><code>devices: [InputDevice]</code></th><td>available inputs</td></tr>
+<tr><th scope="row" class="mono"><code>isSetupValid: Bool</code></th><td>the usage text and the audio entitlement are present</td></tr>
+<tr><th scope="row" class="mono"><code>InputDevice.id: String</code></th><td>the core audio uid, stable across launches</td></tr>
+<tr><th scope="row" class="mono"><code>InputDevice.name: String, isDefault: Bool</code></th><td>a display name, and whether it is the system default input</td></tr>
+</tbody></table></div>
+<div class="table-wrap" tabindex="0" role="region" aria-label="permission states"><table><thead><tr><th scope="col">permission</th><th scope="col">meaning</th><th scope="col">what an app can do</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>notDetermined</code></th><td>never asked</td><td>call requestMicrophone(), or let listen() or record() ask</td></tr>
+<tr><th scope="row" class="mono"><code>granted</code></th><td>ready to capture</td><td>show the mic button</td></tr>
+<tr><th scope="row" class="mono"><code>denied</code></th><td>the user said no</td><td>explain it, and offer openMicrophoneSettings()</td></tr>
+<tr><th scope="row" class="mono"><code>restricted</code></th><td>blocked by a device policy</td><td>show the reason. there is nothing the user can change.</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px">take over the prompt</h3>
+<pre><code>var options = FourierOptions()
+options.permissions = .manual            // the sdk never prompts. record() and listen() throw
+                                         // FourierError.microphoneNotRequested until you ask.
+// or run your own flow, called only when the permission was never asked:
+options.permissions = .custom { await askInMyOwnWay() }   // returns MicrophoneState.Permission
+let speech = Fourier(options)</code></pre>
+<p class="dim">setup mistakes are caught before the request. the app needs <code>NSMicrophoneUsageDescription</code> in its info.plist, and, if sandboxed, the <code>com.apple.security.device.audio-input</code> entitlement. a missing one throws <code>FourierError.setupMissing</code> with the problem named, and <code>MicrophoneState.isSetupValid</code> is false. the input follows the system default and recovers when a microphone is plugged in, removed or changed.</p>
+</section>
+<section aria-labelledby="options">
+<h2 id="options">options reference</h2>
+<p class="dim">every option is public and has a default. <code>FourierOptions()</code> is the recommended setup. defaults are read from the source.</p>
+<pre><code>var options = FourierOptions()
+options.keepWarm = .never
+options.compute.policy = .efficiency
+options.decoding.language = "English"
+options.chunking = .maxPieceLength(.seconds(20))
+options.listen.drafts = false
+options.model.offline = true
+let speech = Fourier(options)</code></pre>
+<h3 style="margin-top:32px"><code>FourierOptions</code></h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="fourier options"><table><thead><tr><th scope="col">option</th><th scope="col">type</th><th scope="col">default</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>compute</code></th><td><code>ComputeOptions</code></td><td><code>ComputeOptions()</code></td><td>placement policy and hard pins</td></tr>
+<tr><th scope="row" class="mono"><code>decoding</code></th><td><code>DecodingOptions</code></td><td><code>DecodingOptions()</code></td><td>decoding for transcribe and record. the default is the checkpoint's own settings, which is the exact path.</td></tr>
+<tr><th scope="row" class="mono"><code>audioSource</code></th><td><code>any AudioSource</code></td><td><code>MicrophoneSource()</code></td><td>where record() and listen() get audio</td></tr>
+<tr><th scope="row" class="mono"><code>inputDevice</code></th><td><code>String?</code></td><td><code>nil</code></td><td>core audio device uid. nil follows the system default input.</td></tr>
+<tr><th scope="row" class="mono"><code>chunking</code></th><td><code>Chunking</code></td><td><code>.automatic</code></td><td>how audio longer than 120 s is cut into pieces</td></tr>
+<tr><th scope="row" class="mono"><code>listen</code></th><td><code>ListenOptions</code></td><td><code>ListenOptions()</code></td><td>the defaults for listen()</td></tr>
+<tr><th scope="row" class="mono"><code>noise</code></th><td><code>NoiseProcessing</code></td><td><code>.automatic</code></td><td>forwards to <code>listen.noise</code>. files and recordings are never cleaned.</td></tr>
+<tr><th scope="row" class="mono"><code>echoCancellation</code></th><td><code>AudioSwitch</code></td><td><code>.automatic</code></td><td>forwards to <code>listen.echoCancellation</code></td></tr>
+<tr><th scope="row" class="mono"><code>gain</code></th><td><code>Gain</code></td><td><code>.automatic</code></td><td>forwards to <code>listen.gain</code></td></tr>
+<tr><th scope="row" class="mono"><code>speechDetector</code></th><td><code>(any SpeechDetecting)?</code></td><td><code>nil</code></td><td>forwards to <code>listen.speechDetector</code>. nil uses the built-in energy gate.</td></tr>
+<tr><th scope="row" class="mono"><code>preRoll</code></th><td><code>Duration</code></td><td><code>.milliseconds(500)</code></td><td>forwards to <code>listen.preRoll</code>. audio kept from before speech starts.</td></tr>
+<tr><th scope="row" class="mono"><code>keepWarm</code></th><td><code>KeepWarm</code></td><td><code>.automatic</code></td><td>how long the model stays loaded</td></tr>
+<tr><th scope="row" class="mono"><code>permissions</code></th><td><code>PermissionHandling</code></td><td><code>.automatic</code></td><td>who asks for the microphone</td></tr>
+<tr><th scope="row" class="mono"><code>model</code></th><td><code>ModelOptions</code></td><td><code>ModelOptions()</code></td><td>where the model is stored and which revision</td></tr>
+<tr><th scope="row" class="mono"><code>modelStore</code></th><td><code>any ModelStore</code></td><td><code>HuggingFaceModelStore()</code></td><td>where the model files come from</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px"><code>ComputeOptions</code></h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="compute options"><table><thead><tr><th scope="col">option</th><th scope="col">type</th><th scope="col">default</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>policy</code></th><td><code>PlacementPolicy</code></td><td><code>.automatic</code></td><td><code>automatic</code> is the fastest measured chip for each stage. <code>npu</code> prefers the neural engine where a path exists. <code>efficiency</code> prefers the lowest power path.</td></tr>
+<tr><th scope="row" class="mono"><code>chips</code></th><td><code>[Stage: Chip]</code></td><td><code>[:]</code></td><td>hard pins. a pin no shipped path can satisfy fails prepare with <code>unsupportedPin</code>.</td></tr>
+<tr><th scope="row" class="mono"><code>precision</code></th><td><code>[Stage: Precision]</code></td><td><code>[:]</code></td><td>hard pins. a pin no shipped path can satisfy fails prepare with <code>unsupportedPrecision</code>.</td></tr>
+</tbody></table></div>
+<p class="dim"><code>ComputeOptions.init(policy:chips:precision:)</code> takes all three, each with its default.</p>
+<h3 style="margin-top:32px"><code>DecodingOptions</code></h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="decoding options"><table><thead><tr><th scope="col">option</th><th scope="col">type</th><th scope="col">default</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>search</code></th><td><code>Search</code></td><td><code>.automatic</code></td><td><code>automatic</code> is the checkpoint's own search, 3 beams. <code>greedy</code>. <code>beam(Int)</code> takes 1 to 12.</td></tr>
+<tr><th scope="row" class="mono"><code>maxTokens</code></th><td><code>Int?</code></td><td><code>nil</code></td><td>nil uses the checkpoint's limit, 512. at least 1 if set.</td></tr>
+<tr><th scope="row" class="mono"><code>repeatGuard</code></th><td><code>Int?</code></td><td><code>nil</code></td><td>no-repeat n-gram size. nil uses the checkpoint's, 8. 0 turns it off.</td></tr>
+<tr><th scope="row" class="mono"><code>language</code></th><td><code>String</code></td><td><code>"English"</code></td><td>a name or code such as english or en. the model is english only, so other languages throw <code>unsupportedLanguage</code>.</td></tr>
+<tr><th scope="row" class="mono"><code>context</code></th><td><code>String?</code></td><td><code>nil</code></td><td>text the model reads before the audio, such as names and terms. nil is the exact path.</td></tr>
+<tr><th scope="row" class="mono"><code>DecodingOptions.reference</code></th><td><code>static let</code></td><td></td><td>the checkpoint's settings: the exact path</td></tr>
+<tr><th scope="row" class="mono"><code>DecodingOptions.fast</code></th><td><code>static let</code></td><td></td><td>greedy, for live drafts</td></tr>
+</tbody></table></div>
+<p class="dim"><code>DecodingOptions.init(search:maxTokens:repeatGuard:language:context:)</code> takes all five, each with its default.</p>
+<h3 style="margin-top:32px"><code>Chunking</code>, <code>AudioSwitch</code> and <code>Gain</code></h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="audio options"><table><thead><tr><th scope="col">case</th><th scope="col">meaning</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>Chunking.automatic</code></th><td>audio up to 120 s runs in one pass. longer audio is cut at quiet points into pieces of at most 30 s.</td></tr>
+<tr><th scope="row" class="mono"><code>Chunking.maxPieceLength(Duration)</code></th><td>longer audio is cut into pieces of at most this length, 1 to 120 s. audio up to 120 s is never cut.</td></tr>
+<tr><th scope="row" class="mono"><code>AudioSwitch.automatic, on, off</code></th><td>voice processing cancels echo and suppresses noise together, so automatic follows <code>noise</code></td></tr>
+<tr><th scope="row" class="mono"><code>Gain.automatic</code></th><td>the system's automatic gain while voice processing runs, unity otherwise</td></tr>
+<tr><th scope="row" class="mono"><code>Gain.fixed(decibels: Float)</code></th><td>a fixed gain in decibels, applied after capture</td></tr>
+<tr><th scope="row" class="mono"><code>NoiseProcessing.automatic</code></th><td>apple's voice processing on the microphone: noise suppression, echo cancellation and gain</td></tr>
+<tr><th scope="row" class="mono"><code>NoiseProcessing.off</code></th><td>no cleaning</td></tr>
+<tr><th scope="row" class="mono"><code>NoiseProcessing.custom(any NoiseProcessor)</code></th><td>your processor runs on each chunk, off the main thread and never on the realtime audio thread</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px"><code>KeepWarm</code> and <code>PermissionHandling</code></h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="lifecycle options"><table><thead><tr><th scope="col">case</th><th scope="col">meaning</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>KeepWarm.automatic</code></th><td>stays loaded after prepare(). cools after 5 idle minutes, under memory pressure or when the mac is hot.</td></tr>
+<tr><th scope="row" class="mono"><code>KeepWarm.always</code></th><td>stays loaded until cool() or critical memory pressure</td></tr>
+<tr><th scope="row" class="mono"><code>KeepWarm.never</code></th><td>lets go of the model as soon as nothing is running</td></tr>
+<tr><th scope="row" class="mono"><code>PermissionHandling.automatic</code></th><td>the first listen() or record() asks for the microphone</td></tr>
+<tr><th scope="row" class="mono"><code>PermissionHandling.manual</code></th><td>the sdk never prompts. call requestMicrophone() yourself.</td></tr>
+<tr><th scope="row" class="mono"><code>PermissionHandling.custom(@Sendable () async -&gt; MicrophoneState.Permission)</code></th><td>called when the permission was never asked. return the permission after your own flow.</td></tr>
+</tbody></table></div>
+<p class="dim">warm never means listening. the microphone is open only during <code>listen()</code> and <code>record()</code>.</p>
+<h3 style="margin-top:32px"><code>ModelOptions</code></h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="model options"><table><thead><tr><th scope="col">option</th><th scope="col">type</th><th scope="col">default</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>directory</code></th><td><code>URL?</code></td><td><code>nil</code></td><td>where the model is stored. nil is the application support folder, under FourierKit/models.</td></tr>
+<tr><th scope="row" class="mono"><code>repository</code></th><td><code>String</code></td><td><code>"oruk/oruk-fourier-2b"</code></td><td>the hugging face repository</td></tr>
+<tr><th scope="row" class="mono"><code>revision</code></th><td><code>String</code></td><td><code>the pinned revision</code></td><td>the pinned revision is <code>8c2a8871f1304aa2f634da4fb95e24438c4945b9</code>. <code>ModelOptions.pinnedRevision</code> returns it.</td></tr>
+<tr><th scope="row" class="mono"><code>sha256</code></th><td><code>String?</code></td><td><code>nil</code></td><td>the weights' sha256. nil uses the pinned one, which only fits the pinned revision. another revision without one throws <code>unverifiedRevision</code>.</td></tr>
+<tr><th scope="row" class="mono"><code>offline</code></th><td><code>Bool</code></td><td><code>false</code></td><td>never touches the network. prepare fails with <code>offlineModelMissing</code> if the model is not on this mac.</td></tr>
+<tr><th scope="row" class="mono"><code>ModelOptions.defaultDirectory</code></th><td><code>static var URL</code></td><td></td><td>where the pinned model lives by default</td></tr>
+</tbody></table></div>
+<p class="dim"><code>ModelOptions.init(directory:revision:sha256:offline:)</code> takes <code>revision</code> as an optional, and nil means the pinned one.</p>
+<h3 style="margin-top:32px"><code>ListenOptions</code></h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="listen options"><table><thead><tr><th scope="col">option</th><th scope="col">type</th><th scope="col">default</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>drafts</code></th><td><code>Bool</code></td><td><code>true</code></td><td>show the changing guess as well as settled text</td></tr>
+<tr><th scope="row" class="mono"><code>updateInterval</code></th><td><code>UpdateInterval</code></td><td><code>.automatic</code></td><td><code>automatic</code> starts near 300 ms and follows measured pass time, so delay never grows. <code>fixed(Duration)</code> pins it.</td></tr>
+<tr><th scope="row" class="mono"><code>settleAfter</code></th><td><code>Int</code></td><td><code>2</code></td><td>agreeing passes before text settles. at least 1.</td></tr>
+<tr><th scope="row" class="mono"><code>pauseToEndPhrase</code></th><td><code>Duration</code></td><td><code>.milliseconds(600)</code></td><td>silence that closes a phrase</td></tr>
+<tr><th scope="row" class="mono"><code>maxPhraseLength</code></th><td><code>Duration</code></td><td><code>.seconds(24)</code></td><td>longest phrase before a forced settle</td></tr>
+<tr><th scope="row" class="mono"><code>noise</code></th><td><code>NoiseProcessing</code></td><td><code>.automatic</code></td><td>live audio cleaning</td></tr>
+<tr><th scope="row" class="mono"><code>echoCancellation</code></th><td><code>AudioSwitch</code></td><td><code>.automatic</code></td><td>automatic follows <code>noise</code></td></tr>
+<tr><th scope="row" class="mono"><code>gain</code></th><td><code>Gain</code></td><td><code>.automatic</code></td><td>automatic gain with voice processing</td></tr>
+<tr><th scope="row" class="mono"><code>speechDetector</code></th><td><code>(any SpeechDetecting)?</code></td><td><code>nil</code></td><td>nil uses the built-in energy gate with <code>pauseToEndPhrase</code></td></tr>
+<tr><th scope="row" class="mono"><code>preRoll</code></th><td><code>Duration</code></td><td><code>.milliseconds(500)</code></td><td>audio kept from before speech starts, so first words are not clipped</td></tr>
+<tr><th scope="row" class="mono"><code>keepWarm</code></th><td><code>KeepWarm</code></td><td><code>.automatic</code></td><td><code>never</code> lets go of the model when the session ends</td></tr>
+<tr><th scope="row" class="mono"><code>decoding</code></th><td><code>Decoding</code></td><td><code>Decoding()</code></td><td><code>draft</code> defaults to <code>DecodingOptions.fast</code> and <code>final</code> to <code>DecodingOptions.reference</code></td></tr>
+<tr><th scope="row" class="mono"><code>finalPass</code></th><td><code>FinalPass</code></td><td><code>.perPhrase</code></td><td><code>perPhrase</code> gives each phrase an exact pass as soon as it closes. <code>fullAudio</code> runs one pass over everything at finish().</td></tr>
+<tr><th scope="row" class="mono"><code>audioSource</code></th><td><code>(any AudioSource)?</code></td><td><code>nil</code></td><td>nil uses the audio source of the fourier instance</td></tr>
+<tr><th scope="row" class="mono"><code>inputDevice</code></th><td><code>String?</code></td><td><code>nil</code></td><td>core audio device uid. nil uses the instance's.</td></tr>
+<tr><th scope="row" class="mono"><code>language</code></th><td><code>String</code></td><td><code>"English"</code></td><td>a computed property. setting it sets the language of both drafts and the final pass.</td></tr>
+</tbody></table></div>
+<p class="dim">the live defaults are starting values from the plan and are not frozen yet.</p>
+</section>
+<section aria-labelledby="parts">
+<h2 id="parts">replaceable parts</h2>
+<p class="dim">each default is a protocol or a plain value, so an app can replace one part and keep the rest. custom parts run off the main thread and never on the realtime audio thread. a custom part can change what the model hears, so it leaves the exactness claim.</p>
+<h3 style="margin-top:32px"><code>NoiseProcessor</code></h3>
+<pre><code>struct MyDenoiser: NoiseProcessor {
+    mutating func process(_ samples: [Float]) -&gt; [Float] {
+        samples   // 16 khz mono in, the same count out
+    }
+}
+
+var options = FourierOptions()
+options.noise = .custom(MyDenoiser())</code></pre>
+<h3 style="margin-top:32px"><code>SpeechDetecting</code></h3>
+<p class="dim">one copy per session, fed off the main thread. positions count samples from the start of the session. <code>configure(pauseToEndPhrase:)</code> has a default that does nothing.</p>
+<pre><code>struct LoudnessDetector: SpeechDetecting {
+    private var position = 0
+    private var speaking = false
+
+    mutating func feed(_ samples: [Float]) -&gt; [SpeechBoundary] {
+        defer { position += samples.count }
+        let peak = samples.reduce(0) { max($0, abs($1)) }
+        if peak &gt; 0.02, !speaking {
+            speaking = true
+            return [.started(at: position)]
+        }
+        if peak &lt; 0.005, speaking {
+            speaking = false
+            return [.ended(at: position + samples.count)]
+        }
+        return []
+    }
+
+    mutating func flush() -&gt; SpeechBoundary? {
+        guard speaking else { return nil }
+        speaking = false
+        return .ended(at: position)
+    }
+}
+
+var options = FourierOptions()
+options.speechDetector = LoudnessDetector()</code></pre>
+<h3 style="margin-top:32px"><code>AudioSource</code> and <code>FileAudioSource</code></h3>
+<p class="dim">a source delivers 16 khz mono float chunks, in order, off the main thread. <code>FileAudioSource</code> plays a file or samples in as if spoken, with no microphone and no permission prompt. it is how the golden test plays clips into listen.</p>
+<pre><code>var options = FourierOptions()
+options.audioSource = FileAudioSource(url: url, realtime: true)   // paced at real speed
+// FileAudioSource(samples: samples, sampleRate: 16_000, realtime: false) delivers as fast as it reads
+
+let speech = Fourier(options)
+let live = try await speech.listen()</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="audio source protocols"><table><thead><tr><th scope="col">declaration</th><th scope="col">what it is</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>protocol AudioSource: Sendable</code></th><td><code>var usesMicrophone: Bool { get }</code> is true if starting needs microphone permission. <code>func start(_ request: AudioSourceRequest) async throws -&gt; AudioInput</code> starts delivering audio.</td></tr>
+<tr><th scope="row" class="mono"><code>AudioSourceRequest</code></th><td><code>purpose</code> (<code>listen</code> or <code>record</code>), <code>voiceProcessing</code>, <code>automaticGain</code>, <code>inputDevice</code> and <code>preRoll</code>. it has a public memberwise init.</td></tr>
+<tr><th scope="row" class="mono"><code>AudioInput</code></th><td><code>samples: AsyncStream&lt;[Float]&gt;</code>, <code>events: AsyncStream&lt;AudioInputEvent&gt;</code> and <code>stop: @Sendable () async -&gt; Void</code>. it has a public init.</td></tr>
+<tr><th scope="row" class="mono"><code>AudioInputEvent</code></th><td><code>capture(MicrophoneState.Capture)</code>, <code>inputChanged(audioMayBeLost:)</code>, <code>deviceUnavailable(String)</code>, <code>voiceProcessingUnavailable(String)</code> and <code>samplesDropped(Int)</code></td></tr>
+<tr><th scope="row" class="mono"><code>protocol NoiseProcessor: Sendable</code></th><td><code>mutating func process(_ samples: [Float]) -&gt; [Float]</code></td></tr>
+<tr><th scope="row" class="mono"><code>protocol SpeechDetecting: Sendable</code></th><td><code>configure(pauseToEndPhrase:)</code>, <code>feed(_:)</code> and <code>flush()</code></td></tr>
+<tr><th scope="row" class="mono"><code>SpeechBoundary</code></th><td><code>started(at: Int)</code> is the first sample of speech. <code>ended(at: Int)</code> is one past the last voiced sample.</td></tr>
+<tr><th scope="row" class="mono"><code>MicrophoneSource</code></th><td>the default. the system microphone, rebuilt automatically when the input changes.</td></tr>
+<tr><th scope="row" class="mono"><code>FileAudioSource</code></th><td><code>init(url:realtime:)</code>, <code>init(samples:sampleRate:realtime:)</code>, <code>realtime</code> and <code>chunk</code> (default 20 ms)</td></tr>
+<tr><th scope="row" class="mono"><code>EnergySpeechDetector</code></th><td>the default detector: an energy gate with an adaptive noise floor. <code>init(pauseToEndPhrase: Duration? = nil)</code>, where nil follows the listen option. apple's sound analysis classifier is not wired in yet.</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px"><code>ModelStore</code></h3>
+<p class="dim">the default <code>HuggingFaceModelStore</code> downloads the pinned checkpoint with resume, checks its sha256 and remembers a verified file. a custom store returns a folder that holds the files named in <code>request.files</code>. cancellation must keep partial files.</p>
+<pre><code>struct LocalStore: ModelStore {
+    var folder: URL
+
+    func prepare(_ request: ModelRequest,
+                 progress: @escaping @Sendable (ModelStoreProgress) -&gt; Void) async throws -&gt; URL {
+        progress(ModelStoreProgress(stage: .check, fraction: 1))
+        return folder
+    }
+}
+
+var options = FourierOptions()
+options.modelStore = LocalStore(folder: folderUrl)</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="model store types"><table><thead><tr><th scope="col">declaration</th><th scope="col">what it is</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>protocol ModelStore: Sendable</code></th><td><code>func prepare(_ request: ModelRequest, progress: @escaping @Sendable (ModelStoreProgress) -&gt; Void) async throws -&gt; URL</code>. makes the files ready on disk and returns their folder. reports progress for the check, download, verify and convert stages.</td></tr>
+<tr><th scope="row" class="mono"><code>ModelRequest</code></th><td><code>repository</code>, <code>revision</code>, <code>directory</code>, <code>files</code>, <code>weightsFile</code>, <code>weightsSHA256</code>, <code>weightsBytes: Int64?</code> and <code>offline</code></td></tr>
+<tr><th scope="row" class="mono"><code>ModelStoreProgress</code></th><td><code>stage: PrepareProgress.Stage</code>, <code>fraction</code> from 0 to 1 within the stage, <code>bytesDone</code> and <code>bytesTotal</code></td></tr>
+<tr><th scope="row" class="mono"><code>HuggingFaceModelStore</code></th><td><code>endpoint</code> (default https://huggingface.co), <code>hashAttempts</code> (default 2) and <code>networkRetries</code> (default 5, each resuming from the last written byte)</td></tr>
+</tbody></table></div>
+</section>
+<section aria-labelledby="errors">
+<h2 id="errors">errors</h2>
+<p class="dim">everything the sdk throws is a <code>FourierError</code>, and each case names the real cause. <code>FourierError</code> is <code>LocalizedError</code> and <code>CustomStringConvertible</code>, and its description says what to do, in lowercase and ready to show.</p>
+<pre><code>do {
+    let live = try await speech.listen()
+    _ = try await live.finish()
+} catch let error as FourierError {
+    switch error {
+    case .microphoneDenied:
+        speech.openMicrophoneSettings()
+    case .cancelled:
+        break
+    default:
+        print(error.description)
+    }
+}</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="fourier errors"><table><thead><tr><th scope="col">case</th><th scope="col">when</th><th scope="col">what to do</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>microphoneDenied</code></th><td>the user said no to the microphone</td><td>show how to turn it on, and call <code>openMicrophoneSettings()</code></td></tr>
+<tr><th scope="row" class="mono"><code>microphoneRestricted</code></th><td>a device policy blocks the microphone</td><td>tell the user to ask whoever manages the mac. there is no button to offer.</td></tr>
+<tr><th scope="row" class="mono"><code>microphoneNotRequested</code></th><td>permissions are <code>.manual</code> and the app has not asked yet</td><td>call <code>requestMicrophone()</code> first</td></tr>
+<tr><th scope="row" class="mono"><code>noMicrophone</code></th><td>there is no input device</td><td>ask the user to connect one</td></tr>
+<tr><th scope="row" class="mono"><code>deviceRemoved</code></th><td>the input device went away and capture could not recover</td><td>connect it again or choose another input</td></tr>
+<tr><th scope="row" class="mono"><code>captureFailed(String)</code></th><td>the audio system refused to capture</td><td>try again or choose another input</td></tr>
+<tr><th scope="row" class="mono"><code>setupMissing(SetupProblem)</code></th><td>the app has no <code>NSMicrophoneUsageDescription</code> (<code>missingUsageDescription</code>) or is sandboxed without <code>com.apple.security.device.audio-input</code> (<code>missingAudioInputEntitlement</code>)</td><td>add it to the app. this is a developer mistake, not a user one.</td></tr>
+<tr><th scope="row" class="mono"><code>downloadFailed(String)</code></th><td>the model download failed</td><td>check the connection and try again. it resumes where it stopped.</td></tr>
+<tr><th scope="row" class="mono"><code>hashMismatch</code></th><td>the downloaded weights did not match the pinned hash, even after a fresh download</td><td>check the connection and try again</td></tr>
+<tr><th scope="row" class="mono"><code>notEnoughDisk(needed:available:)</code></th><td>there is not enough free space, in bytes</td><td>free some space and try again</td></tr>
+<tr><th scope="row" class="mono"><code>offlineModelMissing</code></th><td><code>model.offline</code> is on and the model is not on this mac</td><td>turn offline mode off once to download it</td></tr>
+<tr><th scope="row" class="mono"><code>unverifiedRevision(String)</code></th><td>a revision other than the pinned one has no known checksum</td><td>pass its sha256 in <code>ModelOptions</code></td></tr>
+<tr><th scope="row" class="mono"><code>modelInvalid(String)</code></th><td>the model files could not be read</td><td>delete the model folder and prepare again</td></tr>
+<tr><th scope="row" class="mono"><code>unsupportedPin(stage:chip:)</code></th><td>no shipped path runs that stage on that chip</td><td>remove the pin or use automatic placement</td></tr>
+<tr><th scope="row" class="mono"><code>unsupportedPrecision(stage:precision:)</code></th><td>no shipped path runs that stage in that precision</td><td>remove the pin or use automatic precision</td></tr>
+<tr><th scope="row" class="mono"><code>unreadableAudio(String)</code></th><td>the audio could not be read</td><td>use a file core audio can open</td></tr>
+<tr><th scope="row" class="mono"><code>unsupportedLanguage(String)</code></th><td>the language is not one the model knows</td><td>use english or leave it unset</td></tr>
+<tr><th scope="row" class="mono"><code>invalidOptions(String)</code></th><td>an option is out of range, such as a beam count outside 1 to 12 or <code>settleAfter</code> under 1</td><td>fix the option</td></tr>
+<tr><th scope="row" class="mono"><code>cancelled</code></th><td>the work was cancelled</td><td>nothing. this is the result of <code>cancel()</code> or a cancelled task.</td></tr>
+<tr><th scope="row" class="mono"><code>sessionEnded</code></th><td>the live session already finished or was cancelled</td><td>start a new one</td></tr>
+<tr><th scope="row" class="mono"><code>engineFailure(String)</code></th><td>the engine failed</td><td>try again. if it keeps failing, call <code>cool()</code> and retry.</td></tr>
+</tbody></table></div>
+</section>
+<section aria-labelledby="ui">
+<h2 id="ui">the default ui</h2>
+<p class="status">every view is built only on the public api and takes custom content and styling.</p>
+<p class="dim"><code>FourierKitUI</code> is an optional second import, <code>import FourierKitUI</code>. the core sdk never depends on swiftui. the module ships the allo variable font, unchanged and with its license, and registers it for the app process on first use, so apps need no font setup. every view is built only on the public api above. the models are on the main actor and only draw. the work stays off it.</p>
+<pre><code>import FourierKit
+import FourierKitUI
+import SwiftUI
+
+struct Root: View {
+    @State private var model = FourierStateModel()
+
+    var body: some View {
+        FourierPrepareView(model)
+            .task { await model.observe() }     // reads state until the task is cancelled
+            .fourierFont(.allo)                 // or .system
+    }
+}</code></pre>
+<h3 style="margin-top:32px">models</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="ui models"><table><thead><tr><th scope="col">declaration</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>FourierStateModel</code></th><td>an observable model of the sdk on the main actor. <code>init(_ speech: Fourier = Fourier())</code>. members: <code>speech</code>, <code>state</code>, <code>prepare</code>, <code>microphone</code>, <code>level</code>, <code>metrics</code>, <code>speedHistory</code>, <code>machine</code>, <code>prepareError</code>, <code>isPreparing</code>, <code>isReady</code> and <code>historyLength</code>. calls: <code>observe() async</code>, <code>observeMetrics() async</code>, <code>prepare() async</code>, <code>requestMicrophone() async -&gt; MicrophoneState.Permission</code>, <code>openMicrophoneSettings()</code> and <code>refreshMicrophone() async</code>.</td></tr>
+<tr><th scope="row" class="mono"><code>FourierListenModel</code></th><td>one listen session at a time on the main actor. <code>init(_ speech: Fourier = Fourier(), options: ListenOptions? = nil)</code>. members: <code>phase</code> (<code>idle</code>, <code>starting</code>, <code>listening</code>, <code>finishing</code>), <code>update</code>, <code>level</code>, <code>isSpeaking</code>, <code>transcript</code>, <code>warning</code>, <code>error</code>, <code>startedAt</code>, <code>isRunning</code>, <code>settledText</code>, <code>draftText</code> and <code>onFinish</code>. calls: <code>start()</code>, <code>stop()</code>, <code>toggle()</code>, <code>cancel()</code> and <code>clear()</code>.</td></tr>
+<tr><th scope="row" class="mono"><code>FourierMachine</code></th><td>chip, memory, thermal state and power source of this mac. <code>FourierMachine.read()</code> reads it.</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:32px">views</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="ui views"><table><thead><tr><th scope="col">view</th><th scope="col">initializers</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>FourierPrepareView</code></th><td><code>init(_ model: FourierStateModel, title: String = ..., message: String? = ..., startsPrepare: Bool = true)</code>, and the same with <code>@ViewBuilder accessory: () -&gt; Accessory</code></td><td>download and prepare progress</td></tr>
+<tr><th scope="row" class="mono"><code>FourierPermissionView</code></th><td><code>init(_ model: FourierStateModel, reason: String = ...)</code>, and the same with <code>@ViewBuilder granted: () -&gt; Granted</code></td><td>the microphone request and the denied and restricted states. it shows its content once granted.</td></tr>
+<tr><th scope="row" class="mono"><code>FourierMicButton</code></th><td><code>init(_ listen: FourierListenModel, diameter: CGFloat = 64)</code>, <code>init(status: FourierMicStatus, diameter: CGFloat = 64, action: @escaping () -&gt; Void)</code>, and a version with <code>@ViewBuilder label: @escaping (FourierMicStatus) -&gt; Label</code></td><td>a round start and stop button whose symbol follows the live state</td></tr>
+<tr><th scope="row" class="mono"><code>FourierMicSymbol</code></th><td><code>init(status: FourierMicStatus, size: CGFloat = 24)</code></td><td>the symbol alone</td></tr>
+<tr><th scope="row" class="mono"><code>FourierLevelMeter</code></th><td><code>init(level: Float, isActive: Bool = true, barCount: Int = 24, barWidth: CGFloat = 4, spacing: CGFloat = 4, ink: FourierInk = .secondary)</code></td><td>driven by the input level, 0 to 1</td></tr>
+<tr><th scope="row" class="mono"><code>FourierLiveText</code></th><td><code>init(settled: String, draft: String = "", placeholder: String = "", style: FourierTextStyle = .largeTitle)</code>, <code>init(_ update: LiveUpdate?, ...)</code> and <code>init(_ listen: FourierListenModel, ...)</code></td><td>settled and draft text, lowercase on screen</td></tr>
+<tr><th scope="row" class="mono"><code>FourierStatsView</code></th><td><code>init(_ model: FourierStateModel)</code>, and the same with <code>@ViewBuilder footer: () -&gt; Footer</code></td><td>live speed, latency, packing, chip and memory stats</td></tr>
+</tbody></table></div>
+<p class="dim"><code>FourierLiveView</code> puts prepare, permission, mic, level and live text together: <code>FourierLiveView(speech)</code> is the whole live screen.</p>
+<h3 style="margin-top:32px">type</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="ui type"><table><thead><tr><th scope="col">declaration</th><th scope="col">what it does</th></tr></thead><tbody>
+<tr><th scope="row" class="mono"><code>FourierFont</code></th><td><code>allo</code>, <code>system</code> or <code>custom(@Sendable (FourierTextStyle, FourierNumbers) -&gt; Font)</code>. <code>FourierFont.isAlloAvailable</code> and <code>FourierFont.alloLoadError</code> say whether allo loaded.</td></tr>
+<tr><th scope="row" class="mono"><code>View.fourierFont(_ font: FourierFont)</code></th><td>sets the typeface for every kit view below it. the default is <code>.allo</code>, and it falls back to the system font if allo cannot load.</td></tr>
+<tr><th scope="row" class="mono"><code>View.fourierTextStyle(_ style: FourierTextStyle, numbers: FourierNumbers = .proportional)</code></th><td>sets text in a step of the type scale</td></tr>
+<tr><th scope="row" class="mono"><code>FourierTextStyle</code></th><td><code>init(size:weight:lineHeight:tracking:roundness:)</code> and the steps <code>caption</code>, <code>footnote</code>, <code>body</code>, <code>headline</code>, <code>title</code>, <code>largeTitle</code> and <code>display</code></td></tr>
+<tr><th scope="row" class="mono"><code>FourierNumbers</code></th><td><code>proportional</code> or <code>tabular</code>. use tabular for numbers that change in place.</td></tr>
+</tbody></table></div>
+</section>
+<section aria-labelledby="exactness">
+<h2 id="exactness">exactness and what it covers</h2>
+<p class="dim">on the three golden clips, the default path gives the same token ids and the same final text as hugging face transformers running the original weights. the reference is pinned to one transformers commit, runs on the cpu in 32-bit float with a batch of one, and is frozen in <code>golden/</code>.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="what is covered"><table><thead><tr><th scope="col">case</th><th scope="col">claim</th></tr></thead><tbody>
+<tr><th scope="row">audio up to 120 s, default options</th><td>one pass. identical to the reference on the three golden clips. the golden test checks this on the engine and again through <code>transcribe</code> for a file and a recording.</td></tr>
+<tr><th scope="row">audio over 120 s</th><td>cut at quiet points and joined. that changes the model's input, so it is not claimed identical to one reference pass.</td></tr>
+<tr><th scope="row">a piece that hits the token limit</th><td>split and decoded again, and counted in <code>tokenLimitSplits</code>. <code>reachedStop</code> is false if it could not be split further.</td></tr>
+<tr><th scope="row">any batch width, slot or load</th><td>scores are bit-identical to a run alone. the golden test checks batches and slot refill.</td></tr>
+<tr><th scope="row">changed decoding options</th><td><code>greedy</code>, a different beam count, token limit, repeat guard or <code>context</code> leave the exact path.</td></tr>
+<tr><th scope="row">custom parts</th><td>custom noise processing, speech detection or audio sources change what the model hears, so they leave the exact path.</td></tr>
+<tr><th scope="row">files and recordings</th><td>never cleaned by default, so they can match the reference. file decoding and resampling are outside the contract, because apple's and python's will not match bit for bit. the contract starts at 16 khz mono float32 samples.</td></tr>
+<tr><th scope="row">listen</th><td>drafts use greedy search and are not exact. the final transcript is the exact pass over each phrase. that it equals transcribe with the same split points is a goal. the golden test does not check it yet.</td></tr>
+</tbody></table></div>
+<p class="dim">the golden test is the only automated check. what it checks and how to run it is in CONTRIBUTING.md, and the numbers are on the <a href="performance.html">performance page</a>. only exact paths can be defaults: if a fast path cannot reproduce the reference, a slower exact path stays.</p>
+</section>
+
+<footer>every signature here is read from the public declarations in Sources/FourierKit/Speech.</footer>
+</main>
+</body>
+</html>
