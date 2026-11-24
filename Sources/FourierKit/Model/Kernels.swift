@@ -280,6 +280,58 @@ enum Kernels {
         row[s] = exp(row[s] - top);
     }
 
+    // the three kernels below finish a causal softmax whose scores and value mix were done by
+    // apple's matrix kernel over the whole square. entries past a row's own context become zero
+    // weights, so the matrix product only sees what the row may attend to.
+    kernel void attention_exp_causal(const device Context *CONTEXT [[buffer(2)]],
+                                     device float *SCORES [[buffer(4)]],
+                                     constant AttentionParams &p [[buffer(5)]],
+                                     const device float *RUNS [[buffer(6)]],
+                                     uint3 gid [[thread_position_in_grid]]) {
+        uint s = gid.x;
+        uint h = gid.y;
+        uint n = gid.z;
+        if (s >= p.maxContext || h >= p.heads || n >= p.rows) return;
+        Context c = CONTEXT[n];
+        uint count = c.runCount + c.listCount;
+        device float *row = SCORES + ((ulong)n * p.heads + h) * p.maxContext;
+        if (s >= count) { row[s] = 0.0f; return; }
+        const device float *runs = RUNS + ((ulong)n * p.heads + h) * (p.maxContext >> 6);
+        uint runCount = (count + 63) >> 6;
+        float top = runs[0];
+        for (uint i = 1; i < runCount; i++) top = max(top, runs[i]);
+        row[s] = exp(row[s] - top);
+    }
+
+    kernel void attention_run_total(const device float *SCORES [[buffer(4)]],
+                                    constant AttentionParams &p [[buffer(5)]],
+                                    device float *RUNS [[buffer(6)]],
+                                    uint3 gid [[thread_position_in_grid]]) {
+        uint run = gid.x;
+        uint h = gid.y;
+        uint n = gid.z;
+        if (run >= (p.maxContext >> 6) || h >= p.heads || n >= p.rows) return;
+        const device packed_float4 *row = (const device packed_float4 *)(SCORES + ((ulong)n * p.heads + h) * p.maxContext + (run << 6));
+        float4 acc = float4(0.0f);
+        for (uint i = 0; i < 16; i++) acc += float4(row[i]);
+        RUNS[((ulong)n * p.heads + h) * (p.maxContext >> 6) + run] = sum4(acc);
+    }
+
+    kernel void attention_divide(constant AttentionParams &p [[buffer(5)]],
+                                 const device float *RUNS [[buffer(6)]],
+                                 device float *Y [[buffer(7)]],
+                                 uint3 gid [[thread_position_in_grid]]) {
+        uint d = gid.x;
+        uint h = gid.y;
+        uint n = gid.z;
+        if (d >= (p.headDim >> 2) || h >= p.heads || n >= p.rows) return;
+        const device float *runs = RUNS + ((ulong)n * p.heads + h) * (p.maxContext >> 6);
+        float total = 0.0f;
+        for (uint i = 0; i < (p.maxContext >> 6); i++) total += runs[i];
+        device packed_float4 *y = (device packed_float4 *)(Y + ((ulong)n * p.heads + h) * p.headDim);
+        y[d] = float4(y[d]) / total;
+    }
+
     // per run of 64 slots: the weighted sum of values for one quad of the head, and in the last
     // lane group the run's total weight.
     kernel void attention_partial(const device float *V [[buffer(1)]],

@@ -103,16 +103,16 @@ the test needs the model prepared on this mac and the golden tensors in `golden/
 
 every golden run appends one line to `docs/performance.jsonl`. [docs/performance.html](docs/performance.html) is built from that log and holds the scoreboard, the baselines, the climb over runs and the method. the numbers live there, not here.
 
-the newest passing line today is labelled "plateau: gpu encoder and decoder, quiet machine", measured warm in thermal state 1 (fair) on a fanless m4 macbook air with 32 gb.
+the newest passing line today is labelled "prefill attention on the matrix kernel, quiet machine", measured warm in thermal state 1 (fair) on a fanless m4 macbook air with 32 gb.
 
 | clip | audio | fourierkit, x realtime | transformers on the same mac, x realtime | time to first text |
 |---|---|---|---|---|
-| short | 3.7 s | 4.41 | 1.10 | 0.28 s |
-| medium | 11.2 s | 6.29 | 1.18 | 0.44 s |
-| long | 116.5 s | 6.05 | 0.81 | 4.15 s |
+| short | 3.7 s | 4.33 | 1.10 | 0.30 s |
+| medium | 11.2 s | 6.24 | 1.18 | 0.45 s |
+| long | 116.5 s | 6.34 | 0.81 | 3.26 s |
 
-- three clips in one batch ran at 5.5x realtime in total, and nine pieces sustained ran at 6.1x.
-- the decoder ran 19.5 to 21.7 steps per second. reading the weights alone caps it near 26.
+- three clips in one batch ran at 6.3x realtime in total, and nine pieces sustained ran at 6.2x.
+- the decoder ran 19.2 to 21.7 steps per second. reading the weights alone caps it near 26.
 - played in live at real speed, first text came after 0.7 to 1.1 s and the median draft delay was 0.4 to 0.8 s. the plan's goal of a first draft in about half a second is not met yet.
 - the transformers column is the cpu reference run recorded in `golden/manifest.json` (`reference_seconds`).
 

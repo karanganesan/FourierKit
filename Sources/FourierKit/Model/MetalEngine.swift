@@ -101,6 +101,8 @@ final class MetalEngine: @unchecked Sendable {
     /// from this many rows up, a multiply goes to apple's kernel on 32-bit copies of the weights
     /// made on the fly. below it, the bandwidth kernel reads the raw 16-bit weights.
     var wideRows = 32
+    /// from this many prompt rows up, prefill attention uses the matrix kernel over the whole square
+    var squareRows = 64
 
     let ropeCos: MTLBuffer
     let ropeSin: MTLBuffer
@@ -268,6 +270,20 @@ final class MetalEngine: @unchecked Sendable {
         let made = MPSMatrixMultiplication(
             device: device, transposeLeft: false, transposeRight: true,
             resultRows: count, resultColumns: rows, interiorColumns: cols, alpha: 1, beta: 0
+        )
+        if multiplies.count > 256 { multiplies.removeAll() }
+        multiplies[key] = made
+        return made
+    }
+
+    /// apple's matrix multiply for the two products of square attention: scores (transposed right
+    /// side, scaled) and the value mix (plain).
+    fileprivate func product(resultRows: Int, resultColumns: Int, interior: Int, transposeRight: Bool, alpha: Double) -> MPSMatrixMultiplication {
+        let key = "p\(resultRows)x\(resultColumns)x\(interior)\(transposeRight ? "t" : "n")"
+        if let made = multiplies[key] { return made }
+        let made = MPSMatrixMultiplication(
+            device: device, transposeLeft: false, transposeRight: transposeRight,
+            resultRows: resultRows, resultColumns: resultColumns, interiorColumns: interior, alpha: alpha, beta: 0
         )
         if multiplies.count > 256 { multiplies.removeAll() }
         multiplies[key] = made
@@ -500,6 +516,75 @@ final class Pass {
         bind(contexts, 2)
         params(shared, 5)
         bind(Span(partial), 6)
+        bind(y, 7)
+        dispatch(pipeline, headDim / 4, heads, rows)
+    }
+
+    /// causal attention for a prefill, where row t attends to the first t + 1 rows of the same
+    /// pass. both products run on apple's matrix kernel over the whole square, one head at a time,
+    /// which is several times faster than the per-slot kernels once there are hundreds of rows.
+    /// - parameter firstSlot: the cache slot of row 0. rows are in consecutive slots.
+    func attentionSquare(q: Span, keys: Span, values: Span, contexts: Span, scores: Span, y: Span,
+                         heads: Int, keyHeads: Int, headDim: Int, rows: Int, maxContext: Int, firstSlot: Int) {
+        precondition(maxContext % 64 == 0 && rows <= maxContext)
+        let scale = 1.0 / Float(headDim).squareRoot()
+        let shared = (UInt32(heads), UInt32(keyHeads), UInt32(headDim), UInt32(rows), UInt32(maxContext), scale)
+        let runs = maxContext / 64
+        guard let runBuffer = try? engine.scratch("attention.max", bytes: rows * heads * runs * 4) else { return }
+        let keyWidth = keyHeads * headDim
+        let group = heads / keyHeads
+        func matrix(_ span: Span, extra: Int, rows: Int, columns: Int, stride: Int) -> MPSMatrix {
+            MPSMatrix(buffer: span.buffer, offset: span.offset + extra * 4,
+                      descriptor: MPSMatrixDescriptor(rows: rows, columns: columns, rowBytes: stride * 4, dataType: .float32))
+        }
+
+        close()
+        let scoreProduct = engine.product(resultRows: rows, resultColumns: rows, interior: headDim, transposeRight: true, alpha: Double(scale))
+        for head in 0..<heads {
+            scoreProduct.encode(
+                commandBuffer: commandBuffer,
+                leftMatrix: matrix(q, extra: head * headDim, rows: rows, columns: headDim, stride: heads * headDim),
+                rightMatrix: matrix(keys, extra: firstSlot * keyWidth + head / group * headDim, rows: rows, columns: headDim, stride: keyWidth),
+                resultMatrix: matrix(scores, extra: head * maxContext, rows: rows, columns: rows, stride: heads * maxContext)
+            )
+        }
+        mark("square scores")
+
+        var pipeline = use("attention_run_max")
+        bind(contexts, 2)
+        bind(scores, 4)
+        params(shared, 5)
+        bind(Span(runBuffer), 6)
+        dispatch(pipeline, runs, heads, rows)
+
+        pipeline = use("attention_exp_causal")
+        bind(contexts, 2)
+        bind(scores, 4)
+        params(shared, 5)
+        bind(Span(runBuffer), 6)
+        dispatch(pipeline, maxContext, heads, rows)
+
+        pipeline = use("attention_run_total")
+        bind(scores, 4)
+        params(shared, 5)
+        bind(Span(runBuffer), 6)
+        dispatch(pipeline, runs, heads, rows)
+
+        close()
+        let mixProduct = engine.product(resultRows: rows, resultColumns: headDim, interior: rows, transposeRight: false, alpha: 1)
+        for head in 0..<heads {
+            mixProduct.encode(
+                commandBuffer: commandBuffer,
+                leftMatrix: matrix(scores, extra: head * maxContext, rows: rows, columns: rows, stride: heads * maxContext),
+                rightMatrix: matrix(values, extra: firstSlot * keyWidth + head / group * headDim, rows: rows, columns: headDim, stride: keyWidth),
+                resultMatrix: matrix(y, extra: head * headDim, rows: rows, columns: headDim, stride: heads * headDim)
+            )
+        }
+        mark("square mix")
+
+        pipeline = use("attention_divide")
+        params(shared, 5)
+        bind(Span(runBuffer), 6)
         bind(y, 7)
         dispatch(pipeline, headDim / 4, heads, rows)
     }

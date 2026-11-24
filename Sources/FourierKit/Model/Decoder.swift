@@ -92,7 +92,7 @@ extension MetalEngine {
 
     /// the 28 layers over `rows` rows whose embeddings are already in the `x` work buffer.
     /// each row writes its key and value to its own slot and attends over its own context.
-    private func layerBodies(prefix: String, rows: Int, maxContext: Int) throws -> [(Pass) throws -> Void] {
+    private func layerBodies(prefix: String, rows: Int, maxContext: Int, squareFrom firstSlot: Int? = nil) throws -> [(Pass) throws -> Void] {
         let width = shape.width
         let keyWidth = shape.keyWidth
         let inner = shape.inner
@@ -135,9 +135,15 @@ extension MetalEngine {
                 pass.headNormRope(x: Span(kRaw), y: keySpan, gain: w.kNorm, positions: Span(positions), targets: Span(targets),
                                   heads: keyHeads, headDim: headDim, count: rows, eps: eps)
                 pass.scatterRows(x: Span(vRaw), y: valueSpan, targets: Span(targets), dim: keyWidth, count: rows)
-                pass.attention(q: Span(q), keys: keySpan, values: valueSpan, contexts: Span(contexts), list: Span(list),
-                               scores: Span(scores), y: Span(mixed), heads: heads, keyHeads: keyHeads, headDim: headDim,
-                               rows: rows, maxContext: maxContext)
+                if let firstSlot {
+                    pass.attentionSquare(q: Span(q), keys: keySpan, values: valueSpan, contexts: Span(contexts),
+                                         scores: Span(scores), y: Span(mixed), heads: heads, keyHeads: keyHeads, headDim: headDim,
+                                         rows: rows, maxContext: maxContext, firstSlot: firstSlot)
+                } else {
+                    pass.attention(q: Span(q), keys: keySpan, values: valueSpan, contexts: Span(contexts), list: Span(list),
+                                   scores: Span(scores), y: Span(mixed), heads: heads, keyHeads: keyHeads, headDim: headDim,
+                                   rows: rows, maxContext: maxContext)
+                }
                 pass.gemm(weight: w.o, rows: width, cols: width, x: Span(mixed), y: Span(o), count: rows)
                 pass.add(Span(x), Span(o), into: Span(x), count: rows * width)
                 pass.rmsNorm(x: Span(x), y: Span(h), gain: w.norm2, dim: width, count: rows, eps: eps)
@@ -187,7 +193,9 @@ extension MetalEngine {
         let prefix = "pre."
         let width = shape.width
         do {
-            var bodies = try layerBodies(prefix: prefix, rows: rows, maxContext: (rows + 63) / 64 * 64)
+            // from a few dozen rows up, the square products go to apple's matrix kernel
+            let square = rows >= squareRows ? piece.slots.lowerBound : nil
+            var bodies = try layerBodies(prefix: prefix, rows: rows, maxContext: (rows + 63) / 64 * 64, squareFrom: square)
             let x = try scratch(prefix + "x", bytes: 16)
             let tokens = try scratch(prefix + "tok", bytes: rows * 4)
             let audioRows = try scratch(prefix + "arow", bytes: audio.count * 4)
