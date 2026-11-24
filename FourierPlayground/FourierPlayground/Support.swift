@@ -46,6 +46,41 @@ struct TextFile: FileDocument {
     }
 }
 
+/// a recording as a wav file: 16 khz, one channel, 32-bit float, exactly the samples the model hears
+struct WAVFile: FileDocument {
+    static let readableContentTypes: [UTType] = [.wav]
+    var samples: [Float]
+    var sampleRate = 16_000
+
+    init(samples: [Float]) {
+        self.samples = samples
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        throw CocoaError(.fileReadUnsupportedScheme)
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data())
+    }
+
+    func data() -> Data {
+        func le<T: FixedWidthInteger>(_ value: T) -> [UInt8] {
+            withUnsafeBytes(of: value.littleEndian) { Array($0) }
+        }
+        let bytes = samples.count * 4
+        var out = Data(capacity: 58 + bytes)
+        out += Array("RIFF".utf8) + le(UInt32(50 + bytes)) + Array("WAVE".utf8)
+        // format 3 is ieee float; a non-pcm format carries the extension size (0) and a fact chunk
+        out += Array("fmt ".utf8) + le(UInt32(18)) + le(UInt16(3)) + le(UInt16(1)) + le(UInt32(sampleRate))
+            + le(UInt32(sampleRate * 4)) + le(UInt16(4)) + le(UInt16(32)) + le(UInt16(0))
+        out += Array("fact".utf8) + le(UInt32(4)) + le(UInt32(samples.count))
+        out += Array("data".utf8) + le(UInt32(bytes))
+        samples.withUnsafeBytes { out.append(contentsOf: $0) }
+        return out
+    }
+}
+
 #if os(macOS)
 /// lowercases every menu item the app shows, including the ones the system adds, so menus follow the
 /// all-lowercase rule. titles only: shortcuts and actions are untouched.

@@ -2,6 +2,9 @@ import FourierKit
 import FourierKitUI
 import Foundation
 import Observation
+#if os(iOS)
+import UIKit
+#endif
 
 enum Mode: String, Codable, CaseIterable, Identifiable, Sendable {
     // the order everything lists them in: the sidebar, the tabs, the menu shortcuts
@@ -115,7 +118,7 @@ final class AppModel {
         }
         choseFirstScreen = true
         if launchOptions.skipPrepare {
-            // screenshots of the screens on a machine with no model: nothing is downloaded or loaded
+            // display only (see `LaunchOptions`): the screens show, and nothing is prepared
             hasBeenReady = true
         } else {
             await state.prepare()
@@ -150,10 +153,14 @@ final class AppModel {
 
     // MARK: settings
 
-    /// the settings' options. a layout-screenshot launch never touches the network.
+    /// the settings' options. a display-only launch never touches the network or a model.
     private static func engineOptions(_ settings: PlaygroundSettings) -> FourierOptions {
         var options = settings.options
-        if LaunchOptions.current.skipPrepare { options.model.offline = true }
+        if LaunchOptions.current.skipPrepare {
+            // display only: no network, and a model folder with nothing in it, so no work can run
+            options.model.offline = true
+            options.model.directory = FileManager.default.temporaryDirectory.appendingPathComponent("fourier-display-only", isDirectory: true)
+        }
         return options
     }
 
@@ -230,6 +237,26 @@ final class AppModel {
         }
     }
 
+    // MARK: leaving
+
+    /// ends whatever is capturing and keeps what was heard: listening finishes into a transcript, and a
+    /// recording stops and is transcribed. for a closed window, and for a phone app that leaves the screen.
+    func stopCapture() {
+        guard listen.isRunning || record.isRunning else { return }
+        if listen.phase == .listening || listen.phase == .starting { listen.stop() }
+        if record.phase == .recording || record.phase == .starting { record.toggle() }
+        #if os(iOS)
+        // without background audio ios suspends the app soon after it leaves the screen. ask for
+        // the little time it takes to finish the transcript.
+        let grant = BackgroundGrant()
+        grant.id = UIApplication.shared.beginBackgroundTask(withName: "finish transcript") { grant.end() }
+        Task {
+            while listen.isRunning || record.isRunning { try? await Task.sleep(for: .milliseconds(250)) }
+            grant.end()
+        }
+        #endif
+    }
+
     /// start or stop for the current mode
     func toggleCurrent() {
         switch selection {
@@ -257,6 +284,20 @@ final class AppModel {
         }
     }
 }
+
+#if os(iOS)
+/// the time ios lends an app that has left the screen, ended once, by the work or by the clock
+@MainActor
+private final class BackgroundGrant {
+    var id = UIBackgroundTaskIdentifier.invalid
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
+    }
+}
+#endif
 
 extension Duration {
     var timeInterval: Double {

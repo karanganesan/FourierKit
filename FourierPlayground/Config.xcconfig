@@ -1,0 +1,4 @@
+// build settings that differ per machine live in Local.xcconfig, which git ignores.
+// see Local.example.xcconfig. the file is optional: without it the mac app is signed ad hoc.
+FOURIER_BUNDLE_ID = com.karanganesan.FourierPlayground
+#include? "Local.xcconfig"

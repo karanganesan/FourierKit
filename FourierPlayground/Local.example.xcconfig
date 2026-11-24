@@ -1,0 +1,8 @@
+// copy this file to Local.xcconfig (git ignores that name) and fill in your own values.
+// the mac app builds without it, signed ad hoc. a device build needs the team.
+
+// your apple developer team id, the ten characters shown in the developer portal
+DEVELOPMENT_TEAM = YOURTEAMID
+
+// optional: a bundle id of your own, if com.karanganesan.FourierPlayground is not yours to sign
+// FOURIER_BUNDLE_ID = com.example.FourierPlayground

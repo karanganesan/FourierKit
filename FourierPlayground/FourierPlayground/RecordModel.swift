@@ -23,6 +23,9 @@ final class RecordModel {
     private(set) var update: TranscriptionUpdate?
     private(set) var transcript: Transcript?
     private(set) var error: FourierError?
+    /// the audio of the last recording, kept until its transcript is saved. a failed transcription
+    /// leaves it here, so it can be tried again or saved as a file.
+    private(set) var recording: Recording?
 
     @ObservationIgnored var onFinish: ((Transcript) -> Void)?
     @ObservationIgnored private var recorder: Recorder?
@@ -63,6 +66,8 @@ final class RecordModel {
         phase = .starting
         transcript = nil
         error = nil
+        // only a new recording lets go of the old audio
+        recording = nil
         level = 0
         fraction = 0
         update = nil
@@ -110,12 +115,29 @@ final class RecordModel {
         phase = .transcribing
         level = 0
         let generation = generation
-        let speech = speech
         self.recorder = nil
         Task {
             let recording = await recorder.stop()
             guard self.generation == generation else { return }
-            let job = speech.transcriptionJob(recording)
+            self.recording = recording
+            self.transcribe(recording, generation: generation)
+        }
+    }
+
+    /// runs the transcription again on the audio that is still kept, after a failure
+    func retry() {
+        guard phase == .idle, error != nil, let recording else { return }
+        generation += 1
+        error = nil
+        phase = .transcribing
+        fraction = 0
+        update = nil
+        transcribe(recording, generation: generation)
+    }
+
+    private func transcribe(_ recording: Recording, generation: Int) {
+        let job = speech.transcriptionJob(recording)
+        Task {
             let text = Task {
                 for await value in job.updates {
                     guard self.generation == generation else { return }
@@ -135,6 +157,8 @@ final class RecordModel {
                 self.transcript = transcript
                 self.phase = .idle
                 self.onFinish?(transcript)
+                // the transcript is in the list now, so the audio can go
+                self.recording = nil
             } catch {
                 progress.cancel(); text.cancel()
                 guard self.generation == generation else { return }
@@ -145,8 +169,7 @@ final class RecordModel {
     }
 
     func clear() {
-        guard phase == .idle else { return }
+        guard phase == .idle, error == nil else { return }
         transcript = nil
-        error = nil
     }
 }

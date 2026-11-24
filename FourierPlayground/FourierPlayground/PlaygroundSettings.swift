@@ -74,7 +74,9 @@ struct PlaygroundSettings: Codable, Equatable {
 
     // model
     var modelDirectory: String?
-    var revision = ModelOptions.pinnedRevision
+    /// empty is the pinned checkpoint. the pinned revision itself is never stored, so an sdk update
+    /// that moves the pin moves the playground with it.
+    var revision = ""
     var sha256 = ""
     var offline = false
 
@@ -118,7 +120,7 @@ struct PlaygroundSettings: Codable, Equatable {
         options.listen.keepWarm = warm
         options.permissions = manualPermissions ? .manual : .automatic
 
-        let directory = modelDirectory.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let directory = modelDirectory.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
         let pinned = revision.isEmpty || revision == ModelOptions.pinnedRevision
         options.model = ModelOptions(
             directory: directory,
@@ -146,15 +148,69 @@ struct PlaygroundSettings: Codable, Equatable {
 
     private static let key = "settings"
 
-    static func load() -> PlaygroundSettings {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let settings = try? JSONDecoder().decode(PlaygroundSettings.self, from: data)
-        else { return PlaygroundSettings() }
-        return settings
+    /// every field is optional on disk: a field that is missing, or that this build cannot read,
+    /// keeps its default, so adding a setting never resets the others.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func read<Value: Decodable>(_ key: CodingKeys, _ path: WritableKeyPath<PlaygroundSettings, Value>) {
+            if let value = try? c.decodeIfPresent(Value.self, forKey: key) { self[keyPath: path] = value }
+        }
+        read(.policy, \.policy)
+        read(.chipPins, \.chipPins)
+        read(.precisionPins, \.precisionPins)
+        read(.search, \.search)
+        read(.beamWidth, \.beamWidth)
+        read(.limitTokens, \.limitTokens)
+        read(.maxTokens, \.maxTokens)
+        read(.customRepeatGuard, \.customRepeatGuard)
+        read(.repeatGuard, \.repeatGuard)
+        read(.language, \.language)
+        read(.context, \.context)
+        read(.inputDevice, \.inputDevice)
+        read(.chunkingAutomatic, \.chunkingAutomatic)
+        read(.maxPieceSeconds, \.maxPieceSeconds)
+        read(.noise, \.noise)
+        read(.echoCancellation, \.echoCancellation)
+        read(.gainAutomatic, \.gainAutomatic)
+        read(.gainDecibels, \.gainDecibels)
+        read(.preRollMilliseconds, \.preRollMilliseconds)
+        read(.recordDrafts, \.recordDrafts)
+        read(.drafts, \.drafts)
+        read(.updateAutomatic, \.updateAutomatic)
+        read(.updateMilliseconds, \.updateMilliseconds)
+        read(.settleAfter, \.settleAfter)
+        read(.pauseMilliseconds, \.pauseMilliseconds)
+        read(.maxPhraseSeconds, \.maxPhraseSeconds)
+        read(.finalPass, \.finalPass)
+        read(.draftSearch, \.draftSearch)
+        read(.draftBeamWidth, \.draftBeamWidth)
+        read(.keepWarm, \.keepWarm)
+        read(.manualPermissions, \.manualPermissions)
+        read(.modelDirectory, \.modelDirectory)
+        read(.revision, \.revision)
+        read(.sha256, \.sha256)
+        read(.offline, \.offline)
+        // older builds stored the pinned revision as a literal string, which would fail the next
+        // sdk update that moves the pin. the pinned revision is stored as empty now.
+        if revision == ModelOptions.pinnedRevision { revision = "" }
     }
 
-    func save() {
+    init() {}
+
+    /// the saved settings. a blob that cannot be read is kept under another key, never replaced by
+    /// defaults on its own: nothing is written until the person changes a setting.
+    static func load(_ defaults: UserDefaults = .standard) -> PlaygroundSettings {
+        guard let data = defaults.data(forKey: key) else { return PlaygroundSettings() }
+        if let settings = try? JSONDecoder().decode(PlaygroundSettings.self, from: data) { return settings }
+        let stamp = ISO8601DateFormatter().string(from: Date()).filter { $0.isNumber || $0 == "T" }
+        defaults.set(data, forKey: "\(key).unreadable-\(stamp)")
+        let kept = defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix("\(key).unreadable-") }.sorted()
+        for old in kept.dropLast(3) { defaults.removeObject(forKey: old) }
+        return PlaygroundSettings()
+    }
+
+    func save(_ defaults: UserDefaults = .standard) {
         guard let data = try? JSONEncoder().encode(self) else { return }
-        UserDefaults.standard.set(data, forKey: Self.key)
+        defaults.set(data, forKey: Self.key)
     }
 }

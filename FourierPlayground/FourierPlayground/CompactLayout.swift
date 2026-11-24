@@ -106,6 +106,8 @@ private struct CompactScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.smooth, value: app.hasBeenReady)
+        .safeAreaInset(edge: .bottom, spacing: 0) { RunningBar() }
+        .overlay(alignment: .top) { DisplayOnlyNote() }
         .fourierGlassWindow()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -158,6 +160,7 @@ private struct RecentList: View {
     @State private var selecting = false
     @State private var picked: Set<UUID> = []
     @State private var confirming = false
+    @State private var showingDeleted = false
 
     var body: some View {
         let items = app.recents.items
@@ -173,6 +176,12 @@ private struct RecentList: View {
                     Text("transcripts you make show up here.")
                         .fourierTextStyle(.body)
                         .fourierInk(.secondary)
+                } actions: {
+                    if !app.recents.deleted.isEmpty {
+                        Button("recently deleted") { showingDeleted = true }
+                            .fourierGlassButton()
+                            .fourierTextStyle(.body)
+                    }
                 }
             } else {
                 List(selection: $picked) {
@@ -191,6 +200,15 @@ private struct RecentList: View {
                             Button("delete", systemImage: "trash", role: .destructive) { delete(item.id) }
                         }
                     }
+                    if !app.recents.deleted.isEmpty {
+                        Button { showingDeleted = true } label: {
+                            Text("recently deleted · \(app.recents.deleted.count)")
+                                .fourierTextStyle(.caption)
+                                .fourierInk(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(Color.clear)
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -199,6 +217,8 @@ private struct RecentList: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom, spacing: 0) { RunningBar() }
+        .sheet(isPresented: $showingDeleted) { RecentlyDeletedSheet() }
         .fourierGlassWindow()
         .navigationTitle("recent")
         .navigationBarTitleDisplayMode(.inline)
@@ -235,7 +255,7 @@ private struct RecentList: View {
             Button("delete", role: .destructive, action: deletePicked)
             Button("cancel", role: .cancel) {}
         } message: {
-            Text("they are removed from \(DeviceText.this). you can undo until you quit.")
+            Text("they move to recently deleted on \(DeviceText.this) and stay there for 30 days.")
         }
     }
 

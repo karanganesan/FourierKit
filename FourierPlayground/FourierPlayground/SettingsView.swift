@@ -425,7 +425,7 @@ private struct ModelSettings: View {
             Section {
                 // the label at the row size like every other row; the long value small, as the folder is
                 LabeledContent("revision") {
-                    TextField("revision", text: $app.settings.revision)
+                    TextField("revision", text: $app.settings.revision, prompt: Text("pinned"))
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
                         .fourierTextStyle(.caption, numbers: .tabular)

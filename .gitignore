@@ -20,3 +20,6 @@ __pycache__/
 
 # large golden tensors live on a release, with their hashes in golden/manifest.json
 golden/tensors/
+
+# per-machine signing identity
+FourierPlayground/Local.xcconfig

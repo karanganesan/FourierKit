@@ -47,7 +47,7 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await app.state.refreshMicrophone() }
         }
-        .background(WindowSizer(size: app.launchOptions.windowSize))
+        .background(WindowSizer(size: app.launchOptions.windowSize) { app.stopCapture() })
     }
     #else
     /// iphone, and ipad in slide over or a narrow split, get one screen at a time under a tab bar.
@@ -75,6 +75,8 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await app.state.refreshMicrophone() } }
+            // there is no background audio, so capture ends here and what was heard is transcribed
+            if phase == .background { app.stopCapture() }
         }
         .sheet(isPresented: $app.showSettings) {
             SettingsView()
@@ -229,6 +231,7 @@ private struct Sidebar: View {
     @Environment(\.undoManager) private var undoManager
     @FocusState private var focused: Bool
     @State private var pendingDelete: [UUID] = []
+    @State private var showingDeleted = false
 
     /// every row in order, for the arrow keys
     private var order: [SidebarItem] {
@@ -254,6 +257,15 @@ private struct Sidebar: View {
                     .padding(.horizontal, 8)
                     .padding(.top, 24)
                     .padding(.bottom, 8)
+
+                if app.recents.saveFailed {
+                    Text("transcripts could not be saved. they stay here until the next try.")
+                        .fourierTextStyle(.caption)
+                        .foregroundStyle(Color.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 8)
+                }
 
                 if app.recents.items.isEmpty {
                     Text("transcripts you make show up here")
@@ -282,12 +294,26 @@ private struct Sidebar: View {
                         }
                     }
                 }
+
+                if !app.recents.deleted.isEmpty {
+                    Button { showingDeleted = true } label: {
+                        Text("recently deleted · \(app.recents.deleted.count)")
+                            .fourierTextStyle(.caption)
+                            .fourierInk(.tertiary)
+                            .padding(.horizontal, 8)
+                            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 16)
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .fourierScrollEdges()
+        .sheet(isPresented: $showingDeleted) { RecentlyDeletedSheet() }
         #if os(macOS)
         .focusable()
         .focusEffectDisabled()
@@ -306,7 +332,7 @@ private struct Sidebar: View {
             Button("delete", role: .destructive, action: deletePending)
             Button("cancel", role: .cancel) { pendingDelete = [] }
         } message: {
-            Text("they are removed from \(DeviceText.this). you can undo until you quit.")
+            Text("they move to recently deleted on \(DeviceText.this) and stay there for 30 days.")
         }
         #if os(macOS)
         // control a selects every recent, as command a does from the edit menu
@@ -323,9 +349,12 @@ private struct Sidebar: View {
         RecentActions.delete(id, app: app, undoManager: undoManager)
     }
 
-    /// the delete key: the one selected transcript goes at once and can be undone. several picked
-    /// together ask first, because quitting the app drops undo and there is no other copy.
+    /// the delete key: the one selected transcript goes at once and can be undone, or found again in
+    /// recently deleted. several picked together ask first. a held key deletes once, never a run.
     private func deleteSelection() {
+        #if os(macOS)
+        if let event = NSApp.currentEvent, event.type == .keyDown, event.isARepeat { return }
+        #endif
         let picked = app.recents.items.filter { app.selectedRecents.contains($0.id) }.map(\.id)
         if picked.count > 1 {
             pendingDelete = picked
@@ -343,6 +372,67 @@ private struct Sidebar: View {
         undoManager?.endUndoGrouping()
         undoManager?.setActionName("delete \(picked.count) transcripts")
         app.selectedRecents = []
+    }
+}
+
+/// transcripts deleted in the last 30 days, each with a restore
+struct RecentlyDeletedSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if app.recents.deleted.isEmpty {
+                    ContentUnavailableView {
+                        Label {
+                            Text("nothing deleted").fourierTextStyle(.title)
+                        } icon: {
+                            Image(systemName: "trash")
+                        }
+                    } description: {
+                        Text("deleted transcripts are kept here for 30 days.")
+                            .fourierTextStyle(.body)
+                            .fourierInk(.secondary)
+                    }
+                } else {
+                    List(app.recents.deleted) { entry in
+                        HStack(spacing: 16) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(entry.item.title)
+                                    .fourierTextStyle(.body)
+                                    .fourierInk(.primary)
+                                    .lineLimit(1)
+                                Text("\(entry.item.mode.title) · deleted \(entry.deletedAt.formatted(.relative(presentation: .named)).lowercased())")
+                                    .fourierTextStyle(.caption)
+                                    .fourierInk(.tertiary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                            Button("restore") { app.recents.restoreDeleted(entry.id) }
+                                .fourierGlassButton()
+                                .fourierTextStyle(.body)
+                        }
+                        .padding(.vertical, 8)
+                        .listRowBackground(Color.clear)
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                }
+            }
+            .navigationTitle("recently deleted")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("done") { dismiss() }
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 440, minHeight: 360)
+        #endif
     }
 }
 
@@ -450,6 +540,75 @@ private struct Detail: View {
             }
         }
         .animation(.smooth, value: app.hasBeenReady)
+        .safeAreaInset(edge: .bottom, spacing: 0) { RunningBar() }
+        .overlay(alignment: .top) { DisplayOnlyNote() }
+    }
+}
+
+/// stays on screen for a display-only launch (`-fourierSkipPrepare`), so a screenshot of it cannot pass for a working app
+struct DisplayOnlyNote: View {
+    var body: some View {
+        if LaunchOptions.current.skipPrepare {
+            Text("display only: no model is loaded")
+                .fourierTextStyle(.caption)
+                .fourierInk(.tertiary)
+                .padding(.top, 8)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+/// while something is capturing, a stop control on every screen except its own, which has one
+/// already. so listening or recording never runs on out of sight.
+struct RunningBar: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        let shown = [Mode.listen, .record].filter { running($0) && app.selection != .mode($0) }
+        if !shown.isEmpty {
+            VStack(spacing: 8) {
+                ForEach(shown) { mode in bar(mode) }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 16)
+            .transition(.opacity)
+        }
+    }
+
+    private func running(_ mode: Mode) -> Bool {
+        switch mode {
+        case .listen: app.listen.isRunning
+        case .record: app.record.isRunning
+        case .transcribe: false
+        }
+    }
+
+    private func bar(_ mode: Mode) -> some View {
+        let listening = mode == .listen
+        let status = listening ? FourierMicStatus(app.listen.phase) : app.record.micStatus
+        let canStop = status == .starting || status == .running
+        let word = status == .starting ? "starting" : status == .finishing ? (listening ? "finishing" : "transcribing") : (listening ? "listening" : "recording")
+        let stop = { if listening { app.listen.stop() } else { app.record.toggle() } }
+        return FourierControlBar(action: canStop ? stop : nil) {
+            if status == .running {
+                FourierLevelMeter(level: listening ? app.listen.level : app.record.level, isActive: true, barCount: 16)
+                    .frame(width: 120, height: 24)
+                    .padding(.leading, 8)
+            }
+        } center: {
+            FourierMicButton(status: status, diameter: 48, action: stop) { _ in
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 24, weight: .semibold))
+            }
+            .plain()
+            .disabled(!canStop)
+            .accessibilityLabel(listening ? "stop listening" : "stop recording")
+        } trailing: {
+            Text(word)
+                .fourierTextStyle(.caption)
+                .fourierInk(.tertiary)
+        }
+        .animation(.smooth, value: status)
     }
 }
 
@@ -527,6 +686,8 @@ private struct PlaygroundToolbar: ToolbarContent {
 /// own, in a window and in full screen, and the size and full screen that automation asks for.
 private struct WindowSizer: NSViewRepresentable {
     let size: CGSize?
+    /// called when the window closes: the microphone must not stay on behind a window nobody can see
+    let onClose: () -> Void
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -540,6 +701,9 @@ private struct WindowSizer: NSViewRepresentable {
                 window.center()
             }
             if LaunchOptions.current.fullScreen { window.toggleFullScreen(nil) }
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
+                MainActor.assumeIsolated { onClose() }
+            }
         }
         return view
     }

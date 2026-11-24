@@ -167,6 +167,7 @@ struct TranscribeScreen: View {
 struct RecordScreen: View {
     @Environment(AppModel.self) private var app
     @FocusState private var focused: Bool
+    @State private var exporting = false
 
     var body: some View {
         let record = app.record
@@ -231,6 +232,30 @@ struct RecordScreen: View {
             case .idle:
                 if let transcript = record.transcript {
                     TranscriptText(text: transcript.text, facts: TranscriptText.facts(duration: transcript.duration, speed: transcript.metrics.realtimeSpeed))
+                } else if let recording = record.recording, let error = record.error {
+                    // the audio is still here: nothing is lost until it is transcribed or a new recording starts
+                    VStack(spacing: 16) {
+                        Text("the recording could not be turned into text")
+                            .fourierTextStyle(.title)
+                            .multilineTextAlignment(.center)
+                        Text("\(FourierFormat.error(error)). the \(FourierFormat.clock(recording.duration)) of audio is kept.")
+                            .fourierTextStyle(.body)
+                            .foregroundStyle(Color.red)
+                            .multilineTextAlignment(.center)
+                        HStack(spacing: 8) {
+                            Button("try again") { record.retry() }
+                                .fourierGlassButton(prominent: Self.prominentActions)
+                                .keyboardShortcut(.defaultAction)
+                            Button("save audio…") { exporting = true }
+                                .fourierGlassButton()
+                        }
+                        .fourierTextStyle(.body)
+                        .controlSize(.large)
+                    }
+                    .frame(maxWidth: 400)
+                    .padding(32)
+                    .fileExporter(isPresented: $exporting, document: WAVFile(samples: recording.samples), contentType: .wav,
+                                  defaultFilename: "recording") { _ in }
                 } else {
                     VStack(spacing: 8) {
                         Text("record, then read it")
@@ -271,9 +296,11 @@ struct RecordScreen: View {
     }
 
     #if os(macOS)
+    private static let prominentActions = true
     private static let recordHint = "space to record"
     private static let stopHint = "space to stop"
     #else
+    private static let prominentActions = false
     private static let recordHint = "tap to record"
     private static let stopHint = "tap to stop"
     #endif
@@ -295,7 +322,7 @@ private struct StreamingText: View {
                 .frame(maxWidth: .infinity)
         }
         .defaultScrollAnchor(.top, for: .alignment)
-        .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        .fourierFollowsNewest()
         .fourierScrollEdges()
     }
 }
@@ -336,7 +363,7 @@ struct RecentScreen: View {
                     Image(systemName: "trash")
                 }
             } description: {
-                Text("undo brings it back.").fourierTextStyle(.body)
+                Text("undo brings it back, or find it in recently deleted.").fourierTextStyle(.body)
             } actions: {
                 Button("listen") { app.selection = .mode(.listen) }
                     .fourierGlassButton()

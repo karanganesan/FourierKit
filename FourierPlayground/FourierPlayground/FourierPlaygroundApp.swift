@@ -9,6 +9,7 @@ struct FourierPlaygroundApp: App {
     init() {
         #if DEBUG
         MainThreadWatchdog.shared.start()
+        CodeSnippets.selfCheck()
         #endif
         #if os(macOS)
         DispatchQueue.main.async { MenuLowercaser.shared.start() }
