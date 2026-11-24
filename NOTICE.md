@@ -30,6 +30,14 @@ the model is a derivative of these apache-2.0 models, and their credit is kept h
 - **changes to the weights:** the kit converts them on your machine into formats for the cpu, gpu and neural engine. this can include converting bf16 values to 16-bit float. the converted files are adaptations of the model and stay under its license.
 - the model's creators do not endorse this project.
 
+## the font
+
+`FourierKitUI` and `FourierPlayground` use [allo](https://allo.joshpuckett.me) by josh puckett, based on [inter](https://github.com/rsms/inter) by the inter project authors.
+
+- the font file is bundled unchanged at `Sources/FourierKitUI/Resources/Fonts/AlloVariable.woff2`.
+- it is licensed under the sil open font license 1.1, included beside it as `OFL.txt`.
+- the cc by-nc 4.0 license of this project does not apply to the font.
+
 ## references
 
 these projects were read for ideas only. no code from them is copied here, and none of them is a dependency.
