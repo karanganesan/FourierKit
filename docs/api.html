@@ -823,7 +823,7 @@ struct Root: View {
 <tr><th scope="row" class="mono"><code>FourierFont</code></th><td><code>allo</code>, <code>system</code> or <code>custom(@Sendable (FourierTextStyle, FourierNumbers) -&gt; Font)</code>. <code>FourierFont.isAlloAvailable</code> and <code>FourierFont.alloLoadError</code> say whether allo loaded.</td></tr>
 <tr><th scope="row" class="mono"><code>View.fourierFont(_ font: FourierFont)</code></th><td>sets the typeface for every kit view below it. the default is <code>.allo</code>, and it falls back to the system font if allo cannot load.</td></tr>
 <tr><th scope="row" class="mono"><code>View.fourierTextStyle(_ style: FourierTextStyle, numbers: FourierNumbers = .proportional)</code></th><td>sets text in a step of the type scale</td></tr>
-<tr><th scope="row" class="mono"><code>FourierTextStyle</code></th><td><code>init(size:weight:lineHeight:tracking:roundness:)</code> and four steps: <code>caption</code> (12 on 16), <code>body</code> (16 on 24), <code>title</code> (24 on 32) and <code>largeTitle</code> (32 on 40)</td></tr>
+<tr><th scope="row" class="mono"><code>FourierTextStyle</code></th><td><code>init(size:weight:lineHeight:tracking:roundness:)</code> and three sizes: <code>caption</code> (12 on 16), <code>body</code> (16 on 24), <code>title</code> (16 on 24, semibold) and <code>largeTitle</code> (32 on 40)</td></tr>
 <tr><th scope="row" class="mono"><code>FourierNumbers</code></th><td><code>proportional</code> or <code>tabular</code>. use tabular for numbers that change in place.</td></tr>
 </tbody></table></div>
 </section>

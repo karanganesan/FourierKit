@@ -20,7 +20,7 @@ struct TranscriptText: View {
                         .fourierInk(.tertiary)
                 }
                 Text(text.isEmpty ? "no speech was found." : text.lowercased())
-                    .fourierTextStyle(.title)
+                    .fourierTextStyle(.largeTitle)
                     .fourierInk(text.isEmpty ? .tertiary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)

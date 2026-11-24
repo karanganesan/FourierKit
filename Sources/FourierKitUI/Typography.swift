@@ -26,14 +26,15 @@ public struct FourierTextStyle: Sendable, Hashable {
         self.roundness = roundness
     }
 
-    // four sizes, and nothing in between. every size and line height sits on the 4 and 8 pt grid.
+    // three sizes, and nothing in between: 12, 16 and 32. a heading is the body size in a
+    // heavier weight, not a size of its own. every line height sits on the 8 pt grid.
 
     /// 12 on 16: section headers, meta lines, hints, status
     public static let caption = FourierTextStyle(size: 12, weight: 500, lineHeight: 16)
     /// 16 on 24: every row, label, value, button and paragraph
     public static let body = FourierTextStyle(size: 16, weight: 400, lineHeight: 24)
-    /// 24 on 32: the one heading of a screen or a panel
-    public static let title = FourierTextStyle(size: 24, weight: 500, lineHeight: 32, tracking: -0.2)
+    /// 16 on 24, semibold: the one heading of a screen or a panel
+    public static let title = FourierTextStyle(size: 16, weight: 600, lineHeight: 24)
     /// 32 on 40: transcript text and the big clock
     public static let largeTitle = FourierTextStyle(size: 32, weight: 450, lineHeight: 40, tracking: -0.4)
 

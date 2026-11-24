@@ -68,6 +68,8 @@ struct PlaygroundCommands: Commands {
                 .keyboardShortcut("s", modifiers: [.command, .control])
             Button(app.showStats ? "hide live stats" : "show live stats") { app.showStats.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .control])
+            Button(app.showCode ? "hide code" : "show code") { app.showCode.toggle() }
+                .keyboardShortcut("k", modifiers: [.command, .control])
         }
 
         // speech

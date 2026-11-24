@@ -28,9 +28,15 @@ struct ContentView: View {
                     .frame(width: 320)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
+            if app.showCode {
+                CodePane()
+                    .frame(width: 400)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
         .animation(.smooth(duration: 0.24), value: app.showSidebar)
         .animation(.smooth(duration: 0.24), value: app.showStats)
+        .animation(.smooth(duration: 0.24), value: app.showCode)
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button("sidebar", systemImage: "sidebar.leading") { app.showSidebar.toggle() }
@@ -84,65 +90,81 @@ struct ContentView: View {
 private struct Sidebar: View {
     @Environment(AppModel.self) private var app
     @Environment(\.undoManager) private var undoManager
-    @Environment(\.controlActiveState) private var activeState
     @FocusState private var focused: Bool
 
-    @Environment(\.colorScheme) private var scheme
-    /// the colour that reads on top of the accent: the accent is white in dark mode and black in light mode
-    private var onAccent: Color { scheme == .dark ? .black : .white }
-
-    /// the focused selection is an accent pill, so its label takes the opposite colour, like a selected tab
-    private func inverted(_ item: SidebarItem) -> Bool {
-        // the selection is a quiet tint of the text colour in every state, so labels never invert
-        false
+    /// every row in order, for the arrow keys
+    private var order: [SidebarItem] {
+        Mode.allCases.map(SidebarItem.mode) + app.recents.items.map { SidebarItem.recent($0.id) }
     }
 
     var body: some View {
-        @Bindable var app = app
-        List(selection: $app.selection) {
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(Mode.allCases) { mode in
-                    let ink = inverted(.mode(mode)) ? onAccent : Color.primary
-                    Label {
-                        Text(mode.title).fourierTextStyle(.body).foregroundStyle(ink)
-                    } icon: {
-                        Image(systemName: mode.symbol).foregroundStyle(ink)
+                    SidebarRow(item: .mode(mode)) {
+                        Label {
+                            Text(mode.title)
+                        } icon: {
+                            Image(systemName: mode.symbol).frame(width: 24)
+                        }
                     }
-                    .tag(SidebarItem.mode(mode))
                 }
-            }
 
-            Section {
+                Text("recent")
+                    .fourierTextStyle(.caption)
+                    .fourierInk(.tertiary)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 24)
+                    .padding(.bottom, 8)
+
                 if app.recents.items.isEmpty {
                     Text("transcripts you make show up here")
                         .fourierTextStyle(.caption)
                         .fourierInk(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
-                        .selectionDisabled()
+                        .padding(.horizontal, 8)
                 } else {
                     ForEach(app.recents.items) { item in
-                        RecentRow(item: item, inverted: inverted(.recent(item.id)), onAccent: onAccent)
-                            .tag(SidebarItem.recent(item.id))
-                            .contextMenu {
-                                Button("copy") { Pasteboard.copy(item.text) }
-                                ShareLink("share…", item: item.text)
-                                Divider()
-                                Button("delete", role: .destructive) { delete(item.id) }
+                        SidebarRow(item: .recent(item.id)) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(item.title).lineLimit(1)
+                                Text("\(item.mode.title) · \(item.date.formatted(.relative(presentation: .named)).lowercased())")
+                                    .fourierTextStyle(.caption)
+                                    .fourierInk(.tertiary)
+                                    .lineLimit(1)
                             }
+                            .padding(.vertical, 8)
+                            .accessibilityElement(children: .combine)
+                        }
+                        .contextMenu {
+                            Button("copy") { Pasteboard.copy(item.text) }
+                            ShareLink("share…", item: item.text)
+                            Divider()
+                            Button("delete", role: .destructive) { delete(item.id) }
+                        }
                     }
                 }
-            } header: {
-                Text("recent").fourierTextStyle(.caption)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollEdgeEffectStyle(.soft, for: .top)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focused)
+        .onMoveCommand { direction in
+            guard let index = order.firstIndex(of: app.selection) else { return }
+            switch direction {
+            case .up where index > 0: app.selection = order[index - 1]
+            case .down where index < order.count - 1: app.selection = order[index + 1]
+            default: break
             }
         }
-        .listStyle(.sidebar)
-        .tint(Color.primary.opacity(0.16))
-        .scrollContentBackground(.hidden)
-        .scrollEdgeEffectStyle(.soft, for: .top)
-        .focused($focused)
         .onDeleteCommand {
             if case .recent(let id) = app.selection { delete(id) }
         }
+        .accessibilityLabel("sidebar")
     }
 
     private func delete(_ id: UUID) {
@@ -150,24 +172,33 @@ private struct Sidebar: View {
     }
 }
 
-private struct RecentRow: View {
-    let item: RecentTranscript
-    let inverted: Bool
-    let onAccent: Color
+/// one sidebar row. the selection is drawn here, as the same quiet tint of the text colour in every
+/// state, because the system's own highlight turns into a solid accent block when the list has focus.
+private struct SidebarRow<Content: View>: View {
+    @Environment(AppModel.self) private var app
+    let item: SidebarItem
+    @ViewBuilder var content: Content
+    @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(item.title)
+        let selected = app.selection == item
+        Button {
+            app.selection = item
+        } label: {
+            content
                 .fourierTextStyle(.body)
-                .foregroundStyle(inverted ? onAccent : Color.primary)
-                .lineLimit(1)
-            Text("\(item.mode.title) · \(item.date.formatted(.relative(presentation: .named)).lowercased())")
-                .fourierTextStyle(.caption)
-                .foregroundStyle(inverted ? onAccent.opacity(0.64) : Color.primary.opacity(0.40))
-                .lineLimit(1)
+                .fourierInk(.primary)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                .contentShape(.rect)
         }
-        .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(selected ? 0.12 : hovering ? 0.06 : 0))
+        }
+        .onHover { hovering = $0 }
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -241,6 +272,8 @@ private struct PlaygroundToolbar: ToolbarContent {
                 .disabled(text == nil)
                 .fileExporter(isPresented: $exporting, document: TextFile(text: text ?? ""), contentType: .plainText,
                               defaultFilename: "transcript") { _ in }
+            Button("code", systemImage: "chevron.left.forwardslash.chevron.right") { app.showCode.toggle() }
+                .help(app.showCode ? "hide the code" : "show the code for this screen")
         }
         ToolbarSpacer(.fixed, placement: .primaryAction)
         ToolbarItem(placement: .primaryAction) {

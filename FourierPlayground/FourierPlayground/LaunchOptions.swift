@@ -19,6 +19,7 @@ struct LaunchOptions {
     var listenFile: URL?
     var recordFile: URL?
     var showStats = false
+    var showCode = false
     var windowSize: CGSize?
     var recent: Int?
     var settingsTab: String?
@@ -50,6 +51,7 @@ struct LaunchOptions {
             case "-fourierListenFile": listenFile = file(value()); mode = mode ?? .listen
             case "-fourierRecordFile": recordFile = file(value()); mode = mode ?? .record
             case "-fourierShowStats": showStats = true
+            case "-fourierShowCode": showCode = true
             case "-fourierWindowSize":
                 let parts = (value() ?? "").split(separator: "x").compactMap { Double($0) }
                 if parts.count == 2 { windowSize = CGSize(width: parts[0], height: parts[1]) }

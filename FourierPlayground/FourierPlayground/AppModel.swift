@@ -64,8 +64,14 @@ final class AppModel {
     /// true once the model was ready in this run; after that the modes never block on the prepare screen
     private(set) var hasBeenReady = false
     var selection: SidebarItem = .mode(.listen)
-    var showStats = false
+    var showStats = false {
+        didSet { if showStats, showCode { showCode = false } }
+    }
     var showSidebar = true
+    /// the code pane and the stats pane share the trailing side, one at a time
+    var showCode = false {
+        didSet { if showCode { showStats = false } }
+    }
     /// bumped to ask settings to open on a tab
     var settingsTab = "compute"
 
@@ -96,6 +102,7 @@ final class AppModel {
     func launch() async {
         if let mode = launchOptions.mode { selection = .mode(mode) }
         if launchOptions.showStats { showStats = true }
+        if launchOptions.showCode { showCode = true }
         if let tab = launchOptions.settingsTab { settingsTab = tab }
         await recents.load()
         if let index = launchOptions.recent, recents.items.indices.contains(index) {
