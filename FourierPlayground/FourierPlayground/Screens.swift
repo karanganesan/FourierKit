@@ -32,7 +32,9 @@ struct TranscriptText: View {
             .frame(maxWidth: .infinity)
         }
         .fourierScrollEdges()
+        #if os(macOS)
         .copyable([text])
+        #endif
     }
 
     static func facts(duration: Duration, speed: Double, extra: [String] = []) -> [String] {
@@ -88,17 +90,19 @@ struct TranscribeScreen: View {
     private var empty: some View {
         ContentUnavailableView {
             Label {
-                Text("drop an audio file").fourierTextStyle(.title)
+                Text(Self.emptyTitle).fourierTextStyle(.title)
             } icon: {
                 Image(systemName: "waveform")
             }
         } description: {
-            Text(app.transcribe.error.map(FourierFormat.error) ?? "or choose one. it is turned into text on this mac.")
+            Text(app.transcribe.error.map(FourierFormat.error) ?? Self.emptyMessage)
                 .fourierTextStyle(.body)
                 .foregroundStyle(app.transcribe.error == nil ? Color.primary.opacity(0.64) : Color.red)
         } actions: {
             Button("choose file…") { app.transcribe.choosing = true }
-                .fourierGlassButton(prominent: true)
+                // ios draws a prominent glass button's label white, which vanishes on the white
+                // accent in dark mode, so there it is the plain glass with the label in the text ink
+                .fourierGlassButton(prominent: Self.prominentChoose)
                 .controlSize(.large)
                 .fourierTextStyle(.body)
                 .keyboardShortcut(.defaultAction)
@@ -132,6 +136,16 @@ struct TranscribeScreen: View {
         .fourierGlassPanel()
         .padding(32)
     }
+
+    #if os(macOS)
+    private static let prominentChoose = true
+    private static let emptyTitle = "drop an audio file"
+    private static let emptyMessage = "or choose one. it is turned into text on this mac."
+    #else
+    private static let prominentChoose = false
+    private static let emptyTitle = "choose an audio file"
+    private static let emptyMessage = "from files, or drop one here. it is turned into text on this device."
+    #endif
 
     static func isAudio(_ url: URL) -> Bool {
         if let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .audio) || type.conforms(to: .movie) {
@@ -208,7 +222,7 @@ struct RecordScreen: View {
                     VStack(spacing: 8) {
                         Text("record, then read it")
                             .fourierTextStyle(.title)
-                        Text(record.error.map(FourierFormat.error) ?? "the recording stays on this mac and is turned into text when you stop.")
+                        Text(record.error.map(FourierFormat.error) ?? "the recording stays on \(DeviceText.this) and is turned into text when you stop.")
                             .fourierTextStyle(.body)
                             .foregroundStyle(record.error == nil ? Color.primary.opacity(0.64) : Color.red)
                             .multilineTextAlignment(.center)
@@ -235,13 +249,21 @@ struct RecordScreen: View {
             .accessibilityLabel(record.isRunning ? "stop recording" : "start recording")
             .disabled(!canRecord)
         } trailing: {
-            Text(record.isRunning ? "space to stop" : "space to record")
+            Text(record.isRunning ? Self.stopHint : Self.recordHint)
                 .fourierTextStyle(.caption)
                 .fourierInk(.tertiary)
         }
         .frame(height: 96)
         .frame(maxWidth: .infinity)
     }
+
+    #if os(macOS)
+    private static let recordHint = "space to record"
+    private static let stopHint = "space to stop"
+    #else
+    private static let recordHint = "tap to record"
+    private static let stopHint = "tap to stop"
+    #endif
 }
 
 // MARK: listen
@@ -250,7 +272,11 @@ struct ListenScreen: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
+        #if os(macOS)
         FourierLiveView(state: app.state, listen: app.listen)
+        #else
+        FourierLiveView(state: app.state, listen: app.listen, placeholder: "tap the button and start talking")
+        #endif
     }
 }
 

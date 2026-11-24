@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import FourierKit
 import SwiftUI
@@ -103,3 +104,4 @@ struct PlaygroundCommands: Commands {
         NSApp.sendAction(Selector(action), to: nil, from: nil)
     }
 }
+#endif

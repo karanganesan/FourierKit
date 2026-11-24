@@ -1,13 +1,30 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import SwiftUI
 import UniformTypeIdentifiers
+
+/// the words text uses for the device the app runs on
+enum DeviceText {
+    #if os(macOS)
+    static let this = "this mac"
+    #else
+    static let this = "this device"
+    #endif
+}
 
 /// copies the model's exact text, never the lowercased display
 enum Pasteboard {
     @MainActor
     static func copy(_ text: String) {
+        #if os(macOS)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+        #else
+        UIPasteboard.general.string = text
+        #endif
     }
 }
 
@@ -29,6 +46,7 @@ struct TextFile: FileDocument {
     }
 }
 
+#if os(macOS)
 /// lowercases every menu item the app shows, including the ones the system adds, so menus follow the
 /// all-lowercase rule. titles only: shortcuts and actions are untouched.
 @MainActor
@@ -101,3 +119,24 @@ enum SharePicker {
         NSSharingServicePicker(items: [text]).show(relativeTo: anchor, of: view, preferredEdge: .minY)
     }
 }
+#else
+/// the system share sheet for a piece of text, opened when asked for, from whatever is on top
+enum SharePicker {
+    @MainActor
+    static func show(_ text: String) {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard var top = scene?.keyWindow?.rootViewController else { return }
+        while let presented = top.presentedViewController { top = presented }
+        let sheet = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        if let popover = sheet.popoverPresentationController {
+            // ipad shows it as a popover; it points at the top trailing corner, where the share button is
+            let bounds = top.view.bounds
+            popover.sourceView = top.view
+            popover.sourceRect = CGRect(x: bounds.maxX - 120, y: top.view.safeAreaInsets.top, width: 1, height: 1)
+            popover.permittedArrowDirections = .up
+        }
+        top.present(sheet, animated: true)
+    }
+}
+#endif

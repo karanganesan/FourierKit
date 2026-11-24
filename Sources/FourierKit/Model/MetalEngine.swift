@@ -462,6 +462,20 @@ final class Pass {
             }
             return
         }
+        if bias == nil, cols % 8 == 0, count >= 2 {
+            // three rows per thread share each weight read. bit-identical to the kernel below.
+            let pipeline = use("gemm3")
+            weight(w, 0)
+            bind(x, 1)
+            bind(y, 2)
+            params((UInt32(rows), UInt32(cols), UInt32(count), UInt32(0), UInt32(xStride ?? cols), UInt32(yStride ?? rows)), 4)
+            encoder.dispatchThreads(
+                MTLSize(width: rows, height: (count + 2) / 3, depth: 1),
+                threadsPerThreadgroup: MTLSize(width: min(64, pipeline.maxTotalThreadsPerThreadgroup), height: 1, depth: 1)
+            )
+            mark(rows > 100_000 ? "gemm, output head" : "gemm")
+            return
+        }
         let pipeline = use("gemm")
         weight(w, 0)
         bind(x, 1)

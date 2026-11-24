@@ -61,6 +61,8 @@ final class AppModel {
         }
     }
 
+    /// true once launch arguments and the recent list have chosen the first screen
+    private(set) var choseFirstScreen = false
     /// true once the model was ready in this run; after that the modes never block on the prepare screen
     private(set) var hasBeenReady = false
     var selection: SidebarItem = .mode(.listen)
@@ -74,11 +76,13 @@ final class AppModel {
     }
     /// bumped to ask settings to open on a tab
     var settingsTab = "compute"
+    /// settings as a sheet, on iphone and ipad, where there is no settings window
+    var showSettings = false
 
     init() {
         let settings = PlaygroundSettings.load()
         self.settings = settings
-        let speech = Fourier(settings.options)
+        let speech = Fourier(Self.engineOptions(settings))
         self.speech = speech
         state = FourierStateModel(speech)
         listen = FourierListenModel(speech)
@@ -108,8 +112,14 @@ final class AppModel {
         if let index = launchOptions.recent, recents.items.indices.contains(index) {
             selection = .recent(recents.items[index].id)
         }
-        await state.prepare()
-        if state.isReady || state.prepareError == nil { hasBeenReady = true }
+        choseFirstScreen = true
+        if launchOptions.skipPrepare {
+            // screenshots of the screens on a machine with no model: nothing is downloaded or loaded
+            hasBeenReady = true
+        } else {
+            await state.prepare()
+            if state.isReady || state.prepareError == nil { hasBeenReady = true }
+        }
         // automation waits for the first window layout to settle, so the run measures the work, not the launch
         if launchOptions.openFile != nil || launchOptions.listenFile != nil || launchOptions.recordFile != nil {
             try? await Task.sleep(for: .seconds(1.5))
@@ -139,8 +149,15 @@ final class AppModel {
 
     // MARK: settings
 
+    /// the settings' options. a layout-screenshot launch never touches the network.
+    private static func engineOptions(_ settings: PlaygroundSettings) -> FourierOptions {
+        var options = settings.options
+        if LaunchOptions.current.skipPrepare { options.model.offline = true }
+        return options
+    }
+
     private func applySettings() {
-        let speech = Fourier(settings.options)
+        let speech = Fourier(Self.engineOptions(settings))
         self.speech = speech
         state.speech = speech
         listen.speech = speech

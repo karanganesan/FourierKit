@@ -6,6 +6,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
 
+    #if os(macOS)
     var body: some View {
         @Bindable var app = app
         TabView(selection: $app.settingsTab) {
@@ -19,6 +20,56 @@ struct SettingsView: View {
         .frame(width: 560, height: 520)
         .fourierTextStyle(.body)
     }
+    #else
+    /// the same six groups as the mac's tabs, as a list that pushes each one, in a sheet
+    @State private var path: [String] = []
+
+    private static let groups: [(id: String, symbol: String)] = [
+        ("compute", "cpu"), ("decoding", "textformat"), ("audio", "waveform"),
+        ("listen", "ear"), ("lifecycle", "bolt"), ("model", "shippingbox"),
+    ]
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            List(Self.groups, id: \.id) { group in
+                NavigationLink(value: group.id) {
+                    Label(group.id, systemImage: group.symbol)
+                }
+            }
+            .navigationTitle("settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: String.self) { id in
+                group(id)
+                    .navigationTitle(id)
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(role: .close) { app.showSettings = false }
+                }
+            }
+        }
+        .fourierTextStyle(.body)
+        .onAppear {
+            // a launch argument may ask for one group
+            if let tab = app.launchOptions.settingsTab, Self.groups.contains(where: { $0.id == tab }), path.isEmpty {
+                path = [tab]
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func group(_ id: String) -> some View {
+        switch id {
+        case "compute": ComputeSettings()
+        case "decoding": DecodingSettings()
+        case "audio": AudioSettings()
+        case "listen": ListenSettings()
+        case "lifecycle": LifecycleSettings()
+        default: ModelSettings()
+        }
+    }
+    #endif
 }
 
 /// a grouped form with the reset button at its foot
@@ -41,10 +92,12 @@ private struct SettingsForm<Content: View>: View {
             }
         }
         .formStyle(.grouped)
+        #if os(macOS)
         .scrollContentBackground(.hidden)
         .fourierGlassWindow()
         // no bar or line behind the tabs: they sit on the window like everything else
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        #endif
     }
 }
 
@@ -293,7 +346,7 @@ private struct LifecycleSettings: View {
             } header: {
                 Text("engine")
             } footer: {
-                Hint("automatic keeps the model loaded and lets go after 5 idle minutes, under memory pressure or when the mac is hot.")
+                Hint("automatic keeps the model loaded and lets go after 5 idle minutes, under memory pressure or when the \(DeviceText.this.dropFirst(5)) is hot.")
             }
             Section {
                 Toggle("ask for the microphone myself", isOn: $app.settings.manualPermissions)
@@ -345,12 +398,20 @@ private struct ModelSettings: View {
                         .lineLimit(2)
                         .truncationMode(.middle)
                 }
+                #if os(macOS)
                 HStack {
                     Button("choose folder…") { choosingFolder = true }
                     if app.settings.modelDirectory != nil {
                         Button("use default") { app.settings.modelDirectory = nil }
                     }
                 }
+                #else
+                // a folder picked outside the app is only readable while the picker's grant lasts,
+                // so ios keeps the model inside the app
+                if app.settings.modelDirectory != nil {
+                    Button("use default") { app.settings.modelDirectory = nil }
+                }
+                #endif
             } header: {
                 Text("location")
             }

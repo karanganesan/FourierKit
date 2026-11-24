@@ -206,6 +206,9 @@ actor LiveEngine {
     private var startsWithSpace: [Int32: Bool] = [:]
 
     // scheduling
+    private var passCount = 0
+    /// the draft pass whose tokens may still arrive, 0 when none is running
+    private var activePass = 0
     private var passing = false
     private var lastPassStart = 0.0
     private var passTime: Double?
@@ -524,15 +527,27 @@ actor LiveEngine {
         let heardAt = lastChunkTime
         let started = now()
         lastPassStart = started
-        let request = PieceRequest(
+        var request = PieceRequest(
             samples: slice(phrase.start..<end), language: draftPlan.language, context: draftPlan.context,
             settings: draftPlan.settings, prefix: phrase.settled, priority: .live)
+        // tokens are shown as they are decoded, so text grows through a pass instead of landing at its end
+        passCount += 1
+        let pass = passCount
+        activePass = pass
+        defer { if activePass == pass { activePass = 0 } }
+        if options.drafts {
+            let phraseID = phrase.id
+            request.onTokens = { [weak self] tokens in
+                Task { await self?.partial(tokens, pass: pass, phrase: phraseID) }
+            }
+        }
         let result: PieceResult
         do {
             result = try await host.transcribe(request)
         } catch {
             return
         }
+        activePass = 0
         adapt(passTime: now() - started)
         await runtime.recordLive(draftDelay: .seconds(now() - heardAt))
         // the phrase may have closed while the pass ran; its closing pass takes over
@@ -551,6 +566,19 @@ actor LiveEngine {
         }
         current.draft = Array(full[current.settled.count...])
         current.draftText = decode(current.draft, trimLeading: current.settledText.isEmpty)
+        open = current
+        emitUpdate()
+    }
+
+    /// tokens from a draft pass that is still running. the draft only ever grows from these: a
+    /// partial that is not yet longer than what is on screen changes nothing, so text extends at
+    /// its tail token by token, and corrections to earlier words land when the pass ends.
+    private func partial(_ tokens: [Int32], pass: Int, phrase: Int) {
+        guard activePass == pass, var current = open, current.id == phrase else { return }
+        let fresh = strip(tokens)
+        guard fresh.count > current.draft.count else { return }
+        current.draft = fresh
+        current.draftText = decode(fresh, trimLeading: current.settledText.isEmpty)
         open = current
         emitUpdate()
     }

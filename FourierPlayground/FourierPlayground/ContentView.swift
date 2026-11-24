@@ -7,8 +7,14 @@ struct ContentView: View {
     @SceneStorage("selection") private var storedSelection = SidebarItem.mode(.listen).rawValue
     @SceneStorage("showStats") private var storedStats = false
     @State private var restored = false
+    #if os(macOS)
     @Environment(\.openSettings) private var openSettings
+    #else
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.scenePhase) private var scenePhase
+    #endif
 
+    #if os(macOS)
     var body: some View {
         Panes()
             .background { TextPresence() }
@@ -43,6 +49,39 @@ struct ContentView: View {
         }
         .background(WindowSizer(size: app.launchOptions.windowSize))
     }
+    #else
+    /// iphone, and ipad in slide over or a narrow split, get one screen at a time under a tab bar.
+    /// a full or wide ipad window gets the mac's row of panes. the size class decides, not the device.
+    var body: some View {
+        @Bindable var app = app
+        Group {
+            if sizeClass == .compact {
+                CompactRoot()
+            } else {
+                RegularRoot(title: navigationTitle)
+            }
+        }
+        .background { TextPresence() }
+        .task { await app.state.observe() }
+        .onChange(of: app.state.isReady, initial: true) { _, ready in
+            if ready { app.markReady() }
+        }
+        .onAppear(perform: restore)
+        .onChange(of: app.selection) { _, selection in storedSelection = selection.rawValue }
+        .onChange(of: app.isBusy, initial: true) { _, busy in
+            #if DEBUG
+            MainThreadWatchdog.shared.setMeasuring(busy, label: app.selection.rawValue)
+            #endif
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await app.state.refreshMicrophone() } }
+        }
+        .sheet(isPresented: $app.showSettings) {
+            SettingsView()
+                .environment(app)
+        }
+    }
+    #endif
 
     private var navigationTitle: String {
         switch app.selection {
@@ -55,10 +94,19 @@ struct ContentView: View {
     private func restore() {
         guard !restored else { return }
         restored = true
+        #if os(macOS)
         if app.launchOptions.settingsTab != nil { openSettings() }
+        #else
+        if app.launchOptions.settingsTab != nil { app.showSettings = true }
+        #endif
         guard !app.launchOptions.isAutomated else { return }
         if let item = SidebarItem(rawValue: storedSelection) { app.selection = item }
+        #if os(macOS)
         app.showStats = storedStats
+        #else
+        // on a phone stats is a sheet, and a sheet that opens by itself at launch is in the way
+        if sizeClass != .compact { app.showStats = storedStats }
+        #endif
     }
 }
 
@@ -73,17 +121,39 @@ struct ContentView: View {
 private struct Panes: View {
     @Environment(AppModel.self) private var app
     @SceneStorage("showStats") private var storedStats = false
+    #if os(iOS)
+    @State private var width: CGFloat = .infinity
+    #endif
+
+    /// the mac window cannot shrink below the three panes. an ipad screen can be narrower than
+    /// them, so there the sidebar steps aside while a trailing pane needs the room.
+    private var showsSidebar: Bool {
+        #if os(macOS)
+        app.showSidebar
+        #else
+        let trailing: CGFloat = app.showCode ? 400 : app.showStats ? 320 : 0
+        return app.showSidebar && (trailing == 0 || width >= 224 + 440 + trailing)
+        #endif
+    }
+
+    #if os(macOS)
+    private let detailMinWidth: CGFloat = 440
+    private let detailMinHeight: CGFloat = 480
+    #else
+    private let detailMinWidth: CGFloat = 0
+    private let detailMinHeight: CGFloat = 0
+    #endif
 
     var body: some View {
         HStack(spacing: 0) {
-            if app.showSidebar {
+            if showsSidebar {
                 Sidebar()
                     .frame(width: 224)
                     .transition(.opacity)
             }
             Detail()
                 // with the sidebar (224) and the widest trailing pane (400) this sets the window's minimum size
-                .frame(minWidth: 440, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
+                .frame(minWidth: detailMinWidth, maxWidth: .infinity, minHeight: detailMinHeight, maxHeight: .infinity)
             if app.showStats {
                 FourierStatsView(app.state)
                     .frame(width: 320)
@@ -99,6 +169,9 @@ private struct Panes: View {
         .animation(.smooth(duration: 0.16), value: app.showStats)
         .animation(.smooth(duration: 0.16), value: app.showCode)
         .onChange(of: app.showStats) { _, show in storedStats = show }
+        #if os(iOS)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        #endif
     }
 }
 
@@ -215,6 +288,7 @@ private struct Sidebar: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .fourierScrollEdges()
+        #if os(macOS)
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
@@ -227,18 +301,21 @@ private struct Sidebar: View {
             }
         }
         .onDeleteCommand(perform: deleteSelection)
+        #endif
         .alert("delete \(pendingDelete.count) transcripts?", isPresented: Binding(get: { !pendingDelete.isEmpty }, set: { if !$0 { pendingDelete = [] } })) {
             Button("delete", role: .destructive, action: deletePending)
             Button("cancel", role: .cancel) { pendingDelete = [] }
         } message: {
-            Text("they are removed from this mac. you can undo until you quit.")
+            Text("they are removed from \(DeviceText.this). you can undo until you quit.")
         }
+        #if os(macOS)
         // control a selects every recent, as command a does from the edit menu
         .onKeyPress(keys: ["a"]) { press in
             guard press.modifiers.contains(.control) || press.modifiers.contains(.command) else { return .ignored }
             app.selectAllRecents()
             return .handled
         }
+        #endif
         .accessibilityLabel("sidebar")
     }
 
@@ -285,8 +362,13 @@ private struct SidebarRow<Content: View>: View {
     var body: some View {
         let selected = app.selection == item || isPicked
         Button {
+            #if os(macOS)
             let flags = NSEvent.modifierFlags
             app.pick(item, command: flags.contains(.command), shift: flags.contains(.shift))
+            #else
+            // a tap picks one. several at once is the recent list's select mode on a phone.
+            app.pick(item, command: false, shift: false)
+            #endif
         } label: {
             content
                 .fourierTextStyle(.body)
@@ -320,6 +402,32 @@ enum RecentActions {
         undoManager?.setActionName("delete transcript")
     }
 }
+
+#if os(iOS)
+/// a wide ipad window: the mac's row of panes under a navigation bar, settings as a sheet
+private struct RegularRoot: View {
+    @Environment(AppModel.self) private var app
+    let title: String
+
+    var body: some View {
+        NavigationStack {
+            Panes()
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        ToolIcon("sidebar", symbol: "sidebar.leading", help: "show or hide the sidebar", width: 40) { app.showSidebar.toggle() }
+                    }
+                    ToolbarItem(placement: .topBarLeading) {
+                        ToolIcon("settings", symbol: "gearshape", help: "settings", width: 40) { app.showSettings = true }
+                    }
+                    PlaygroundToolbar()
+                }
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .fourierGlassWindow()
+        }
+    }
+}
+#endif
 
 // MARK: detail
 
@@ -413,6 +521,8 @@ private struct PlaygroundToolbar: ToolbarContent {
 
 // MARK: the window itself
 
+#if os(macOS)
+
 /// reaches the window for what swiftui has no modifier for: a title bar with no background of its
 /// own, in a window and in full screen, and the size and full screen that automation asks for.
 private struct WindowSizer: NSViewRepresentable {
@@ -436,3 +546,4 @@ private struct WindowSizer: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
+#endif

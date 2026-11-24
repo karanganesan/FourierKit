@@ -18,6 +18,9 @@ struct PieceRequest: Sendable {
     var priority: Priority = .file
     /// how many ranked candidates to keep per step, for the golden test
     var recordCandidates: Int = 0
+    /// called after every decoder step of a greedy piece with the tokens generated so far, so live
+    /// text can grow token by token instead of arriving when the pass ends. called on the host.
+    var onTokens: (@Sendable ([Int32]) -> Void)? = nil
 }
 
 struct PieceTimings: Sendable {
@@ -332,6 +335,7 @@ actor EngineHost {
             let outcome = greedy.advance(logits: logits)
             if request.recordCandidates > 0 { candidates.append(outcome.candidates) }
             search = .greedy(greedy)
+            request.onTokens?(greedy.result())
         }
         cpuSeconds += Self.now() - clock
         timings.firstToken = Self.now() - item.arrived
@@ -403,6 +407,7 @@ actor EngineHost {
                 let outcome = greedy.advance(logits: slice)
                 if item.request.recordCandidates > 0 { item.candidates.append(outcome.candidates) }
                 item.search = .greedy(greedy)
+                item.request.onTokens?(greedy.result())
             }
             item.widest = max(item.widest, rows)
             if isFinished(item) { finished.append(index) }

@@ -82,6 +82,40 @@ enum Kernels {
         Y[(ulong)n * p.yStride + r] = s;
     }
 
+    // the same product for three rows per thread: the weight row is read once and used three
+    // times, which about doubles a wide batch. each row keeps its own two running sums and adds
+    // in exactly the order `gemm` does, so every value is bit-identical to it at any batch width.
+    // for weights without a bias whose width is a multiple of 8, which is every decoder matrix.
+    kernel void gemm3(const device ushort *W [[buffer(0)]],
+                      const device float *X [[buffer(1)]],
+                      device float *Y [[buffer(2)]],
+                      constant GemmParams &p [[buffer(4)]],
+                      uint2 gid [[thread_position_in_grid]]) {
+        uint r = gid.x;
+        uint n = gid.y * 3;
+        if (r >= p.rows || n >= p.count) return;
+        const device packed_ushort4 *w4 = (const device packed_ushort4 *)(W + (ulong)r * p.cols);
+        // a row past the end reads the last real row and is never written
+        uint last = p.count - 1;
+        const device packed_float4 *x0 = (const device packed_float4 *)(X + (ulong)n * p.xStride);
+        const device packed_float4 *x1 = (const device packed_float4 *)(X + (ulong)min(n + 1, last) * p.xStride);
+        const device packed_float4 *x2 = (const device packed_float4 *)(X + (ulong)min(n + 2, last) * p.xStride);
+        float4 even0 = float4(0.0f), odd0 = float4(0.0f);
+        float4 even1 = float4(0.0f), odd1 = float4(0.0f);
+        float4 even2 = float4(0.0f), odd2 = float4(0.0f);
+        uint quads = p.cols >> 2;
+        for (uint c = 0; c < quads; c += 2) {
+            float4 w0 = widen4(w4[c]);
+            float4 w1 = widen4(w4[c + 1]);
+            even0 += w0 * float4(x0[c]); odd0 += w1 * float4(x0[c + 1]);
+            even1 += w0 * float4(x1[c]); odd1 += w1 * float4(x1[c + 1]);
+            even2 += w0 * float4(x2[c]); odd2 += w1 * float4(x2[c + 1]);
+        }
+        Y[(ulong)n * p.yStride + r] = sum4(even0 + odd0);
+        if (n + 1 < p.count) Y[(ulong)(n + 1) * p.yStride + r] = sum4(even1 + odd1);
+        if (n + 2 < p.count) Y[(ulong)(n + 2) * p.yStride + r] = sum4(even2 + odd2);
+    }
+
     kernel void widen(const device ushort *W [[buffer(0)]],
                       device float *Y [[buffer(1)]],
                       constant CountOnly &p [[buffer(3)]],

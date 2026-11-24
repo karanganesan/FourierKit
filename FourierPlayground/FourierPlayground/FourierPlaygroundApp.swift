@@ -10,10 +10,13 @@ struct FourierPlaygroundApp: App {
         #if DEBUG
         MainThreadWatchdog.shared.start()
         #endif
+        #if os(macOS)
         DispatchQueue.main.async { MenuLowercaser.shared.start() }
+        #endif
     }
 
     var body: some Scene {
+        #if os(macOS)
         Window("fourier playground", id: "main") {
             ContentView()
                 .environment(app)
@@ -31,5 +34,13 @@ struct FourierPlaygroundApp: App {
             SettingsView()
                 .environment(app)
         }
+        #else
+        // one scene: the app's state, the engine and the microphone are one per process
+        WindowGroup {
+            ContentView()
+                .environment(app)
+                .task { await app.launch() }
+        }
+        #endif
     }
 }
