@@ -2,6 +2,8 @@
 
 speech to text for `oruk/oruk-fourier-2b`, written in swift on apple frameworks only (accelerate, core ml, metal). no third-party packages.
 
+website: [karanganesan.com/fourierkit](https://karanganesan.com/fourierkit/), with recordings of the app, the speed and accuracy figures and how it packs inference.
+
 this repo has two parts.
 
 - `FourierKit` is the sdk. one import, three modes, every option exposed and defaulted. `FourierKitUI` is an optional second import with default swiftui views.
@@ -148,6 +150,7 @@ the encoder also has a neural engine path, about 3x faster than the gpu on two m
 
 the docs are single-file html in `docs/`, served by github pages.
 
+- [website](https://karanganesan.com/fourierkit/): the kit's page, for a first look
 - [plan](https://karanganesan.github.io/FourierKit/plan.html): goals, rules, how we work, phases, and what changed from the plan
 - [architecture](https://karanganesan.github.io/FourierKit/architecture.html): which chip runs each step, where bits are fixed and how work is packed
 - [api](https://karanganesan.github.io/FourierKit/api.html): the public api with examples
